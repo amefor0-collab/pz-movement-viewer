@@ -1,0 +1,48 @@
+﻿:root {
+  font-family: 'Segoe UI', 'Yu Gothic UI', 'Hiragino Kaku Gothic ProN', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #1a2a46;
+  background-color: #f5f7fc;
+  --icon-color-default: #1f77b4;
+  --trail-color-default: #ff7f0e;
+  --heatmap-color-1: #313695;
+  --heatmap-color-2: #4575b4;
+  --heatmap-color-3: #74add1;
+  --heatmap-color-4: #abd9e9;
+  --heatmap-color-5: #fee090;
+  --heatmap-color-6: #fdae61;
+  --heatmap-color-7: #f46d43;
+  --heatmap-color-8: #d73027;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+code {
+  padding: 0.06rem 0.35rem;
+  border-radius: 0.32rem;
+  background: #eef2f8;
+}

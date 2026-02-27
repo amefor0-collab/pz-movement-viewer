@@ -31,3 +31,9 @@ data/
 public/data/map_latest.bmp
 *.bmp
 data/movement.csv
+
+# deploy assets for GitHub Pages
+!public/data/
+!public/data/tracks.json
+!public/data/snapshot.json
+!public/data/PZfullmap.png

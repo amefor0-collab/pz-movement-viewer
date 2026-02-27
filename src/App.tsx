@@ -199,9 +199,6 @@ const TRACKS_URL = `${import.meta.env.BASE_URL}data/tracks.json`
 const SNAPSHOT_URL = `${import.meta.env.BASE_URL}data/snapshot.json`
 const MAP_MANIFEST_URL = `${import.meta.env.BASE_URL}data/map/manifest.json`
 const MAP_ASSET_BASE_URL = `${import.meta.env.BASE_URL}data/map/`
-const MAP_IMAGE_CANDIDATES = [
-  `${import.meta.env.BASE_URL}data/PZfullmap.png`,
-] as const
 const PLAYBACK_SPEEDS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2024] as const
 const WINDOW_PRESET_HOURS = [1, 2, 4, 6, 12, 24] as const
 const TRAIL_WINDOW_SEC = 30 * 60
@@ -1316,8 +1313,6 @@ function App() {
   const [mapManifestStatus, setMapManifestStatus] = useState<LoadStatus>('idle')
   const [mapManifest, setMapManifest] = useState<MapAssetManifest | null>(null)
   const [lowResStatus, setLowResStatus] = useState<LoadStatus>('idle')
-  const [mapImageLoaded, setMapImageLoaded] = useState(false)
-  const [mapImageError, setMapImageError] = useState(false)
   const [tileCacheTick, setTileCacheTick] = useState(0)
 
   const mapStageRef = useRef<HTMLDivElement | null>(null)
@@ -1325,7 +1320,6 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const statusWindowRef = useRef<HTMLElement | null>(null)
   const lowResImageRef = useRef<HTMLImageElement | null>(null)
-  const mapImageRef = useRef<HTMLImageElement | null>(null)
   const tileCacheRef = useRef<Map<string, HTMLImageElement | 'loading' | 'error'>>(new Map())
   const focusScrubRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{
@@ -1610,57 +1604,6 @@ function App() {
     tileCacheRef.current.clear()
     setTileCacheTick((prev) => prev + 1)
   }, [mapManifest])
-
-  const shouldLoadFallbackMapImage =
-    mapManifestStatus === 'error' ||
-    (mapManifestStatus === 'ready' &&
-      (!mapManifest?.lowRes?.enabled || !mapManifest.lowRes.file || lowResStatus === 'error'))
-
-  useEffect(() => {
-    if (!shouldLoadFallbackMapImage) {
-      mapImageRef.current = null
-      setMapImageLoaded(false)
-      setMapImageError(false)
-      return
-    }
-
-    let canceled = false
-    setMapImageLoaded(false)
-    setMapImageError(false)
-
-    const tryLoad = (index: number) => {
-      if (canceled) {
-        return
-      }
-      if (index >= MAP_IMAGE_CANDIDATES.length) {
-        mapImageRef.current = null
-        setMapImageLoaded(false)
-        setMapImageError(true)
-        return
-      }
-
-      const image = new Image()
-      image.decoding = 'async'
-      image.src = MAP_IMAGE_CANDIDATES[index]
-      image.onload = () => {
-        if (canceled) {
-          return
-        }
-        mapImageRef.current = image
-        setMapImageLoaded(true)
-        setMapImageError(false)
-      }
-      image.onerror = () => {
-        tryLoad(index + 1)
-      }
-    }
-
-    tryLoad(0)
-    return () => {
-      canceled = true
-      mapImageRef.current = null
-    }
-  }, [shouldLoadFallbackMapImage])
 
   useEffect(() => {
     const target = mapStageRef.current
@@ -2508,23 +2451,23 @@ function App() {
     return pickTileLevel(mapManifest.tiles.levels, zoom)
   }, [mapManifest, zoom])
 
-  const backgroundLoading =
-    mapManifestStatus === 'loading' ||
-    lowResStatus === 'loading' ||
-    (shouldLoadFallbackMapImage && !mapImageLoaded && !mapImageError)
+  const hasLowResBackground = lowResStatus === 'ready'
+  const hasTileBackground = selectedTileLevel != null
+  const backgroundLoading = mapManifestStatus === 'loading' || lowResStatus === 'loading'
   const backgroundUnavailable =
-    !mapImageLoaded &&
-    mapImageError &&
-    (lowResStatus === 'error' || mapManifestStatus === 'error')
+    !hasLowResBackground &&
+    !hasTileBackground &&
+    (mapManifestStatus === 'error' ||
+      lowResStatus === 'error' ||
+      (mapManifestStatus === 'ready' &&
+        (!mapManifest?.lowRes?.enabled || !mapManifest.lowRes.file)))
   const mapModeLabel = selectedTileLevel
     ? `タイル表示 (${selectedTileLevel.id})`
-    : lowResStatus === 'ready'
+    : hasLowResBackground
       ? '低画質背景'
-      : mapImageLoaded
-        ? '単一背景画像'
-        : backgroundUnavailable
-          ? 'グリッド背景'
-          : '背景読み込み中'
+      : backgroundUnavailable
+        ? 'グリッド背景'
+        : '背景読み込み中'
   const statusWindowStyle = statusWindowPosition
     ? { left: `${statusWindowPosition.x}px`, top: `${statusWindowPosition.y}px` }
     : undefined
@@ -3090,12 +3033,6 @@ function App() {
       }
     }
 
-    const mapImage = mapImageRef.current
-    if (!drewBackground && mapImageLoaded && mapImage && !mapImageError) {
-      drawRasterImageFromMapRect(context, mapImage, bounds, cameraMetrics, mapViewportRect)
-      drewBackground = true
-    }
-
     if (!drewBackground) {
       context.strokeStyle = 'rgba(91, 109, 133, 0.26)'
       context.lineWidth = 1
@@ -3305,8 +3242,6 @@ function App() {
     iconColor,
     lowResStatus,
     mapManifest,
-    mapImageError,
-    mapImageLoaded,
     overlayMode,
     characterLabelPlacements,
     renderedCharacters,
@@ -3670,11 +3605,6 @@ function App() {
                     )}
                     {backgroundLoading && (
                       <span className="pill">背景アセットを読み込み中...</span>
-                    )}
-                    {lowResStatus === 'error' && mapImageLoaded && (
-                      <span className="pill warning">
-                        低画質背景の読み込みに失敗。単一背景画像で表示中
-                      </span>
                     )}
                     {backgroundUnavailable && (
                       <span className="pill warning">

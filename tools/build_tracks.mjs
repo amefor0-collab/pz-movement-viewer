@@ -20,11 +20,9 @@ const publicDataDir = path.join(ROOT, 'public', 'data')
 const csvPath = path.join(dataDir, 'movement.csv')
 const snapshotPath = path.join(dataDir, 'snapshot.json')
 const mapLatestPath = path.join(dataDir, 'map_latest.bmp')
-const mapLegacyPath = path.join(dataDir, 'PZfullmap.png')
 const tracksOutPath = path.join(publicDataDir, 'tracks.json')
 const snapshotOutPath = path.join(publicDataDir, 'snapshot.json')
 const mapLatestOutPath = path.join(publicDataDir, 'map_latest.bmp')
-const mapLegacyOutPath = path.join(publicDataDir, 'PZfullmap.png')
 
 const snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf-8'))
 const charToPlayerName = new Map()
@@ -144,10 +142,6 @@ if (fs.existsSync(mapLatestPath)) {
   fs.copyFileSync(mapLatestPath, mapLatestOutPath)
   copiedMaps.push(mapLatestOutPath)
 }
-if (fs.existsSync(mapLegacyPath)) {
-  fs.copyFileSync(mapLegacyPath, mapLegacyOutPath)
-  copiedMaps.push(mapLegacyOutPath)
-}
 
 console.log('Wrote', tracksOutPath)
 console.log('Copied', snapshotOutPath)
@@ -155,6 +149,6 @@ for (const copiedMapPath of copiedMaps) {
   console.log('Copied', copiedMapPath)
 }
 if (copiedMaps.length === 0) {
-  console.log('Map image not found in data/:', 'map_latest.bmp or PZfullmap.png')
+  console.log('Map image not found in data/:', 'map_latest.bmp')
 }
 console.log('Characters:', characters.size)

@@ -1,0 +1,58 @@
+﻿{
+    "version":  1,
+    "generatedAt":  "2026-02-28T03:18:48.2140442+09:00",
+    "source":  {
+                   "file":  "map_latest.bmp",
+                   "width":  22562,
+                   "height":  23690
+               },
+    "world":  {
+                  "minX":  3000,
+                  "maxX":  15000,
+                  "minY":  900,
+                  "maxY":  13500,
+                  "scalePxPerTile":  1.88
+              },
+    "lowRes":  {
+                   "enabled":  true,
+                   "file":  "low/map_low_q45.jpg",
+                   "width":  3901,
+                   "height":  4096,
+                   "maxDimension":  4096,
+                   "quality":  45
+               },
+    "tiles":  {
+                  "enabled":  true,
+                  "sizePx":  512,
+                  "quality":  55,
+                  "levels":  [
+                                 {
+                                     "id":  "z0",
+                                     "scale":  1,
+                                     "width":  22562,
+                                     "height":  23690,
+                                     "columns":  45,
+                                     "rows":  47,
+                                     "path":  "tiles/z0"
+                                 },
+                                 {
+                                     "id":  "z1",
+                                     "scale":  0.5,
+                                     "width":  11281,
+                                     "height":  11845,
+                                     "columns":  23,
+                                     "rows":  24,
+                                     "path":  "tiles/z1"
+                                 },
+                                 {
+                                     "id":  "z2",
+                                     "scale":  0.25,
+                                     "width":  5640,
+                                     "height":  5922,
+                                     "columns":  12,
+                                     "rows":  12,
+                                     "path":  "tiles/z2"
+                                 }
+                             ]
+              }
+}

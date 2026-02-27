@@ -10,6 +10,20 @@ function unixSecFromJst(y, m, d, hh = 0, mm = 0, ss = 0) {
   return Math.floor(utcMs / 1000)
 }
 
+function sanitizePlayerName(value) {
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed) {
+    return ''
+  }
+  if (trimmed === 'ㅤㅤㅤ') {
+    return ''
+  }
+  if (trimmed.toLowerCase() === 'admin') {
+    return ''
+  }
+  return trimmed
+}
+
 const PERIOD_START = unixSecFromJst(2026, 2, 1, 0, 0, 0)
 const PERIOD_END = unixSecFromJst(2026, 2, 28, 23, 59, 59)
 const OFFLINE_GAP_SEC = 2 * 60 * 60
@@ -25,11 +39,12 @@ const snapshotOutPath = path.join(publicDataDir, 'snapshot.json')
 const mapLatestOutPath = path.join(publicDataDir, 'map_latest.bmp')
 
 const snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf-8'))
+const publicSnapshot = JSON.parse(JSON.stringify(snapshot))
 const charToPlayerName = new Map()
 
 for (const entry of Object.values(snapshot.data ?? {})) {
   const charName = String(entry?.name ?? '').trim()
-  const playerName = String(entry?.playerName ?? '').trim()
+  const playerName = sanitizePlayerName(entry?.playerName)
   if (!charName) {
     continue
   }
@@ -37,6 +52,13 @@ for (const entry of Object.values(snapshot.data ?? {})) {
     throw new Error(`Duplicate character name in snapshot: "${charName}"`)
   }
   charToPlayerName.set(charName, playerName)
+}
+
+for (const entry of Object.values(publicSnapshot.data ?? {})) {
+  if (!entry || typeof entry !== 'object') {
+    continue
+  }
+  entry.playerName = sanitizePlayerName(entry.playerName)
 }
 
 const characters = new Map()
@@ -136,7 +158,7 @@ const tracks = {
 
 fs.mkdirSync(publicDataDir, { recursive: true })
 fs.writeFileSync(tracksOutPath, JSON.stringify(tracks), 'utf-8')
-fs.copyFileSync(snapshotPath, snapshotOutPath)
+fs.writeFileSync(snapshotOutPath, JSON.stringify(publicSnapshot), 'utf-8')
 const copiedMaps = []
 if (fs.existsSync(mapLatestPath)) {
   fs.copyFileSync(mapLatestPath, mapLatestOutPath)

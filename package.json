@@ -9,6 +9,7 @@
     "build:tracks": "node tools/build_tracks.mjs",
     "build:map-assets": "powershell -NoProfile -ExecutionPolicy Bypass -File ./tools/generate_map_assets.ps1",
     "lint": "eslint .",
+    "test": "tsc -p tsconfig.test.json && node ./tools/run_compiled_tests.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

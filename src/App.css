@@ -40,12 +40,35 @@
   color: #36486a;
 }
 
+.intro-layout {
+  margin-top: 0.25rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(15rem, 0.8fr);
+  gap: 0.95rem;
+  align-items: stretch;
+}
+
+.intro-action-panel,
+.intro-note-panel {
+  padding: 1rem 1.05rem;
+  border: 1px solid rgba(214, 224, 239, 0.95);
+  border-radius: 0.9rem;
+  background: rgba(246, 249, 254, 0.82);
+}
+
+.intro-action-panel h2,
+.intro-note-panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  color: #1d3c67;
+}
+
 .intro-notes {
-  margin: 1rem 0 0;
+  margin: 0;
   padding-left: 1.1rem;
   color: #314461;
   display: grid;
-  gap: 0.32rem;
+  gap: 0.45rem;
 }
 
 .intro-notes li {
@@ -53,10 +76,72 @@
 }
 
 .intro-actions {
-  margin-top: 1.2rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.65rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.intro-action-button {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 0.82rem;
+  width: 100%;
+  display: grid;
+  justify-items: start;
+  gap: 0.18rem;
+  text-align: left;
+  padding: 0.8rem 0.95rem;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.intro-action-button strong {
+  font-size: 0.9rem;
+}
+
+.intro-action-button span {
+  font-size: 0.74rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.intro-action-button-map {
+  background: linear-gradient(180deg, #1f5bb1 0%, #17458d 100%);
+  border-color: rgba(18, 57, 116, 0.95);
+  color: #ffffff;
+  box-shadow: 0 10px 24px rgba(23, 69, 141, 0.24);
+}
+
+.intro-action-button-map:hover,
+.intro-action-button-map:focus-visible {
+  background: linear-gradient(180deg, #1d56a8 0%, #153f81 100%);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.intro-action-button-map span {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.intro-action-button-ranking {
+  background: linear-gradient(180deg, #fff0d9 0%, #ffe3b4 100%);
+  border-color: rgba(214, 166, 73, 0.95);
+  color: #6b4200;
+  box-shadow: 0 10px 24px rgba(194, 144, 53, 0.18);
+}
+
+.intro-action-button-ranking:hover,
+.intro-action-button-ranking:focus-visible {
+  background: linear-gradient(180deg, #ffebcc 0%, #ffddaa 100%);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.intro-action-button-ranking span {
+  color: #865b14;
 }
 
 .ranking-screen {
@@ -1513,6 +1598,10 @@
 @media (max-width: 900px) {
   .ranking-screen {
     padding: 1rem;
+  }
+
+  .intro-layout {
+    grid-template-columns: 1fr;
   }
 
   .ranking-hero,

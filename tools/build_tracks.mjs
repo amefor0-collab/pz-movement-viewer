@@ -1,4 +1,4 @@
-import fs from 'node:fs'
+﻿import fs from 'node:fs'
 import path from 'node:path'
 
 function parseCsvLine(line) {
@@ -10,18 +10,32 @@ function unixSecFromJst(y, m, d, hh = 0, mm = 0, ss = 0) {
   return Math.floor(utcMs / 1000)
 }
 
+function isExcludedPlayerName(value) {
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed) {
+    return false
+  }
+  return trimmed === '\u3164\u3164\u3164' || trimmed.toLowerCase() === 'admin'
+}
+
 function sanitizePlayerName(value) {
   const trimmed = String(value ?? '').trim()
   if (!trimmed) {
     return ''
   }
-  if (trimmed === 'ㅤㅤㅤ') {
-    return ''
-  }
-  if (trimmed.toLowerCase() === 'admin') {
+  if (isExcludedPlayerName(trimmed)) {
     return ''
   }
   return trimmed
+}
+
+function isPlayerNameFallbackValue(playerName, playerId) {
+  const normalizedName = String(playerName ?? '').trim()
+  const normalizedId = String(playerId ?? '').trim()
+  if (!normalizedName) {
+    return true
+  }
+  return normalizedName === normalizedId
 }
 
 const PERIOD_START = unixSecFromJst(2026, 2, 1, 21, 0, 0)
@@ -41,24 +55,51 @@ const mapLatestOutPath = path.join(publicDataDir, 'map_latest.bmp')
 const snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf-8'))
 const publicSnapshot = JSON.parse(JSON.stringify(snapshot))
 const charToPlayerName = new Map()
+const playerIdToPreferredName = new Map()
+const excludedCharacterNames = new Set()
 
 for (const entry of Object.values(snapshot.data ?? {})) {
   const charName = String(entry?.name ?? '').trim()
+  const playerId = String(entry?.playerID ?? '').trim()
+  const rawPlayerName = String(entry?.playerName ?? '').trim()
   const playerName = sanitizePlayerName(entry?.playerName)
+
   if (!charName) {
+    continue
+  }
+  if (isExcludedPlayerName(rawPlayerName)) {
+    excludedCharacterNames.add(charName)
     continue
   }
   if (charToPlayerName.has(charName)) {
     throw new Error(`Duplicate character name in snapshot: "${charName}"`)
   }
+
   charToPlayerName.set(charName, playerName)
+  if (playerId && !isPlayerNameFallbackValue(playerName, playerId) && !playerIdToPreferredName.has(playerId)) {
+    playerIdToPreferredName.set(playerId, playerName)
+  }
 }
 
-for (const entry of Object.values(publicSnapshot.data ?? {})) {
+for (const [key, entry] of Object.entries(publicSnapshot.data ?? {})) {
   if (!entry || typeof entry !== 'object') {
     continue
   }
-  entry.playerName = sanitizePlayerName(entry.playerName)
+
+  const charName = String(entry.name ?? '').trim()
+  if (excludedCharacterNames.has(charName)) {
+    delete publicSnapshot.data[key]
+    continue
+  }
+
+  const playerId = String(entry.playerID ?? '').trim()
+  const sanitizedPlayerName = sanitizePlayerName(entry.playerName)
+  entry.playerName =
+    isPlayerNameFallbackValue(sanitizedPlayerName, playerId) && playerIdToPreferredName.has(playerId)
+      ? playerIdToPreferredName.get(playerId)
+      : sanitizedPlayerName
+
+  charToPlayerName.set(charName, entry.playerName)
 }
 
 const characters = new Map()
@@ -94,6 +135,9 @@ for (const line of lines) {
     continue
   }
   if (!charName) {
+    continue
+  }
+  if (excludedCharacterNames.has(charName)) {
     continue
   }
   if (event !== 'move') {

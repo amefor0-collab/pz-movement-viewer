@@ -1362,21 +1362,28 @@ function getNearestOnlineTimeForCharacters(
   return best
 }
 
-function getLatestObservedTimeForCharacter(
+function getCurrentOnlineIntervalStart(
   character: CharacterTrack,
   currentTime: number,
 ) {
-  if (currentTime < character.life.start) {
-    return Number.NEGATIVE_INFINITY
+  const sample = getPointAtTime(character, currentTime)
+  if (
+    !sample ||
+    sample.beforeStart ||
+    sample.afterEnd ||
+    sample.offline
+  ) {
+    return Number.POSITIVE_INFINITY
   }
 
-  const upperTime = Math.min(currentTime, character.life.end)
-  const index = upperBound(character.track.t, upperTime) - 1
-  if (index < 0) {
-    return Number.NEGATIVE_INFINITY
+  const intervals = getCharacterOnlineIntervals(character)
+  for (const interval of intervals) {
+    if (currentTime >= interval.start && currentTime <= interval.end) {
+      return interval.start
+    }
   }
 
-  return character.track.t[index] ?? Number.NEGATIVE_INFINITY
+  return Number.POSITIVE_INFINITY
 }
 
 function isEventVisibleOnCurrentScreen(
@@ -2274,7 +2281,7 @@ function App() {
           character,
           state,
           active: currentTrackedCharacterName === character.charName,
-          recentOnlineTime: getLatestObservedTimeForCharacter(character, currentTime),
+          onlineStartedAt: getCurrentOnlineIntervalStart(character, currentTime),
           visible: visibility[character.charName] !== false,
         }
       })
@@ -2288,6 +2295,12 @@ function App() {
         return a.active ? -1 : 1
       }
       if (a.state !== b.state) {
+        if (a.state === 'online') {
+          return -1
+        }
+        if (b.state === 'online') {
+          return 1
+        }
         if (a.state === 'dead') {
           return -1
         }
@@ -2295,8 +2308,8 @@ function App() {
           return 1
         }
       }
-      if (a.recentOnlineTime !== b.recentOnlineTime) {
-        return a.recentOnlineTime > b.recentOnlineTime ? -1 : 1
+      if (a.state === 'online' && b.state === 'online' && a.onlineStartedAt !== b.onlineStartedAt) {
+        return b.onlineStartedAt - a.onlineStartedAt
       }
       return a.character.charName.localeCompare(b.character.charName, 'ja')
     })
@@ -2338,7 +2351,7 @@ function App() {
       representative: CharacterTrack | null
       currentCharacterName: string
       active: boolean
-      recentOnlineTime: number
+      onlineStartedAt: number
       respawnVisible: boolean
       visible: boolean
       totalCount: number
@@ -2380,10 +2393,10 @@ function App() {
       const active = playerCharacters.some((character) =>
         trackedCharacterNames.has(character.charName),
       )
-      const recentOnlineTime = playerCharacters.reduce((latest, character) => {
-        const observedTime = getLatestObservedTimeForCharacter(character, currentTime)
-        return observedTime > latest ? observedTime : latest
-      }, Number.NEGATIVE_INFINITY)
+      const onlineStartedAt = playerCharacters.reduce((earliest, character) => {
+        const intervalStart = getCurrentOnlineIntervalStart(character, currentTime)
+        return intervalStart < earliest ? intervalStart : earliest
+      }, Number.POSITIVE_INFINITY)
       const respawnVisible = playerCharacters.some((character) => {
         const spawnTime = character.track.t[0] ?? character.life.start
         const hasPreviousDeath = playerCharacters.some((other) => {
@@ -2416,7 +2429,7 @@ function App() {
         representative,
         currentCharacterName: representative?.charName ?? '-',
         active,
-        recentOnlineTime,
+        onlineStartedAt,
         respawnVisible,
         visible: filteredCharacters.some(
           (character) => visibility[character.charName] !== false,
@@ -2434,6 +2447,12 @@ function App() {
         return a.active ? -1 : 1
       }
       if (a.state !== b.state) {
+        if (a.state === 'online') {
+          return -1
+        }
+        if (b.state === 'online') {
+          return 1
+        }
         if (a.state === 'dead') {
           return -1
         }
@@ -2441,8 +2460,8 @@ function App() {
           return 1
         }
       }
-      if (a.recentOnlineTime !== b.recentOnlineTime) {
-        return a.recentOnlineTime > b.recentOnlineTime ? -1 : 1
+      if (a.state === 'online' && b.state === 'online' && a.onlineStartedAt !== b.onlineStartedAt) {
+        return b.onlineStartedAt - a.onlineStartedAt
       }
       return a.playerName.localeCompare(b.playerName, 'ja')
     })
@@ -3849,7 +3868,7 @@ function App() {
                           }
                           onClick={() => setListSortMode('online')}
                         >
-                          最近オンライン順
+                          オンライン順
                         </button>
                         <button
                           className={

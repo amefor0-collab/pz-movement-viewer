@@ -24,8 +24,8 @@ function sanitizePlayerName(value) {
   return trimmed
 }
 
-const PERIOD_START = unixSecFromJst(2026, 2, 1, 0, 0, 0)
-const PERIOD_END = unixSecFromJst(2026, 2, 28, 23, 59, 59)
+const PERIOD_START = unixSecFromJst(2026, 2, 1, 21, 0, 0)
+const PERIOD_END = unixSecFromJst(2026, 2, 28, 23, 0, 0)
 const OFFLINE_GAP_SEC = 2 * 60 * 60
 
 const ROOT = process.cwd()
@@ -139,8 +139,8 @@ const tracks = {
   meta: {
     timezone: 'Asia/Tokyo',
     periodJST: {
-      start: '2026-02-01T00:00:00+09:00',
-      end: '2026-02-28T23:59:59+09:00',
+      start: '2026-02-01T21:00:00+09:00',
+      end: '2026-02-28T23:00:00+09:00',
     },
     bounds: {
       worldW: 15000 - 3000,

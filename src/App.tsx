@@ -7,11 +7,7 @@
   type WheelEvent as ReactWheelEvent,
 } from 'react'
 import './App.css'
-import {
-  heatmapSettings,
-  viewerColorSettings,
-  zoomSettings,
-} from './config/viewerSettings'
+import { viewerColorSettings, zoomSettings } from './config/viewerSettings'
 
 type Bounds = {
   worldW: number
@@ -93,19 +89,6 @@ type RenderedCharacter = {
   screenY: number
 }
 
-type HeatmapCell = {
-  x: number
-  y: number
-  count: number
-  normalized: number
-}
-
-type HeatmapData = {
-  cells: HeatmapCell[]
-  p95: number
-  maxCount: number
-}
-
 type MapManifestLowRes = {
   enabled?: boolean
   file?: string
@@ -150,8 +133,9 @@ type PeriodRange = {
   end: number
 }
 
-type OverlayMode = 'normal' | 'heatmap' | 'respawn' | 'death'
+type OverlayMode = 'normal' | 'events'
 type ListMode = 'character' | 'player'
+type EventKind = 'respawn' | 'death' | 'logout'
 
 type TimeInterval = {
   start: number
@@ -176,6 +160,22 @@ type CharacterTerminalInfo = {
   terminalType: CharacterTerminalType
 }
 
+type EventPoint = {
+  id: string
+  kind: EventKind
+  charName: string
+  playerName: string
+  x: number
+  y: number
+  time: number
+}
+
+type EventHoverTooltip = {
+  clientX: number
+  clientY: number
+  points: EventPoint[]
+}
+
 type CharacterLabelPlacement = {
   charName: string
   anchorX: number
@@ -187,10 +187,16 @@ type CharacterLabelPlacement = {
   alpha: number
 }
 
-type DeathHoverTooltip = {
-  charName: string
+type CharacterHoverTooltip = {
   clientX: number
   clientY: number
+  charNames: string[]
+}
+
+type HoveredCharacterEntry = {
+  charName: string
+  renderedCharacter: RenderedCharacter | null
+  snapshotRecord: SnapshotRecord | null
 }
 
 const INTRO_HASH = '#/'
@@ -206,6 +212,8 @@ const MIN_WINDOW_SEC = 60 * 60
 const MAX_ZOOM = 32
 const HOVER_RADIUS_PX = 12
 const DEATH_HIGHLIGHT_SEC = 12 * 60 * 60
+const EVENT_MARKER_DISPLAY_SEC = 2 * 60 * 60
+const EVENT_MARKER_FADE_SEC = 15 * 60
 const OFFLINE_THRESHOLD_SEC = 2 * 60 * 60
 const TRACKED_MODE_PADDING_SEC = 5
 const FIXED_PERIOD_START_SEC = Date.parse('2026-02-01T21:00:00+09:00') / 1000
@@ -251,18 +259,137 @@ function getEventMarkerScale(zoom: number) {
   return clamp(1 + Math.log2(safeZoom) * 0.16, 1, 1.8)
 }
 
-function getMapHoverTooltipStyle(tooltip: DeathHoverTooltip | null) {
+function getMapHoverTooltipStyle(
+  tooltip: { clientX: number; clientY: number } | null,
+  tooltipHeight = 152,
+  tooltipWidth = 260,
+) {
   if (!tooltip || typeof window === 'undefined') {
     return undefined
   }
-  const tooltipWidth = 260
-  const tooltipHeight = 152
   const left = clamp(tooltip.clientX + 14, 8, window.innerWidth - tooltipWidth - 8)
   const top = clamp(tooltip.clientY + 14, 8, window.innerHeight - tooltipHeight - 8)
   return {
     left: `${left}px`,
     top: `${top}px`,
   }
+}
+
+function drawEventMarker(
+  context: CanvasRenderingContext2D,
+  point: EventPoint,
+  cameraMetrics: CameraMetrics,
+  viewportSize: { width: number; height: number },
+  zoom: number,
+  alpha = 1,
+) {
+  if (alpha <= 0) {
+    return
+  }
+
+  const markerScale = getEventMarkerScale(zoom)
+  const respawnRadius = 4.1 * markerScale
+  const crossHalf = 4 * markerScale
+  const logoutRadius = 5.2 * markerScale
+  const maxRadius =
+    point.kind === 'respawn' ? respawnRadius : point.kind === 'death' ? crossHalf * 1.1 : logoutRadius
+  const screen = worldToScreen(point.x, point.y, cameraMetrics)
+
+  if (
+    screen.x < -maxRadius - 4 ||
+    screen.y < -maxRadius - 4 ||
+    screen.x > viewportSize.width + maxRadius + 4 ||
+    screen.y > viewportSize.height + maxRadius + 4
+  ) {
+    return
+  }
+
+  context.save()
+  context.globalAlpha = clamp(alpha, 0, 1)
+
+  if (point.kind === 'respawn') {
+    context.lineWidth = Math.max(1.2, 1.2 * markerScale)
+    context.fillStyle = 'rgba(24, 125, 56, 0.82)'
+    context.beginPath()
+    context.arc(screen.x, screen.y, respawnRadius, 0, Math.PI * 2)
+    context.fill()
+    context.strokeStyle = 'rgba(255, 255, 255, 0.72)'
+    context.beginPath()
+    context.arc(screen.x, screen.y, respawnRadius, 0, Math.PI * 2)
+    context.stroke()
+    context.restore()
+    return
+  }
+
+  if (point.kind === 'death') {
+    context.strokeStyle = 'rgba(20, 20, 20, 0.9)'
+    context.lineWidth = Math.max(2.2, 2.6 * markerScale)
+    context.beginPath()
+    context.moveTo(screen.x - crossHalf * 1.05, screen.y - crossHalf * 1.05)
+    context.lineTo(screen.x + crossHalf * 1.05, screen.y + crossHalf * 1.05)
+    context.moveTo(screen.x + crossHalf * 1.05, screen.y - crossHalf * 1.05)
+    context.lineTo(screen.x - crossHalf * 1.05, screen.y + crossHalf * 1.05)
+    context.stroke()
+
+    context.strokeStyle = 'rgba(178, 45, 45, 0.95)'
+    context.lineWidth = Math.max(1.4, 1.5 * markerScale)
+    context.beginPath()
+    context.moveTo(screen.x - crossHalf, screen.y - crossHalf)
+    context.lineTo(screen.x + crossHalf, screen.y + crossHalf)
+    context.moveTo(screen.x + crossHalf, screen.y - crossHalf)
+    context.lineTo(screen.x - crossHalf, screen.y + crossHalf)
+    context.stroke()
+    context.restore()
+    return
+  }
+
+  context.fillStyle = 'rgba(255, 255, 255, 0.94)'
+  context.beginPath()
+  context.arc(screen.x, screen.y, logoutRadius, 0, Math.PI * 2)
+  context.fill()
+
+  context.strokeStyle = 'rgba(188, 38, 38, 0.96)'
+  context.lineWidth = Math.max(1.5, 1.5 * markerScale)
+  context.beginPath()
+  context.arc(screen.x, screen.y, logoutRadius, 0, Math.PI * 2)
+  context.stroke()
+
+  context.fillStyle = 'rgba(20, 20, 20, 0.96)'
+  context.font = `bold ${Math.round(10 + (markerScale - 1) * 3)}px "Segoe UI", "Yu Gothic UI", sans-serif`
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  context.fillText('?', screen.x, screen.y + 0.3)
+  context.textAlign = 'start'
+  context.textBaseline = 'alphabetic'
+  context.restore()
+}
+
+function getEventMarkerAlpha(
+  point: EventPoint,
+  overlayMode: OverlayMode,
+  currentTime: number,
+  visibleRange: { start: number; end: number },
+) {
+  if (overlayMode === 'normal') {
+    const visibleUntil = point.time + EVENT_MARKER_DISPLAY_SEC
+    if (currentTime >= visibleUntil) {
+      return 0
+    }
+    if (currentTime <= visibleUntil - EVENT_MARKER_FADE_SEC) {
+      return 1
+    }
+    return clamp((visibleUntil - currentTime) / EVENT_MARKER_FADE_SEC, 0, 1)
+  }
+
+  if (overlayMode === 'events') {
+    const rangeWidth = Math.max(1, visibleRange.end - visibleRange.start)
+    const fadeSec = clamp(rangeWidth * 0.08, 15 * 60, 2 * 60 * 60)
+    const fadeIn = clamp((point.time - visibleRange.start) / fadeSec, 0, 1)
+    const fadeOut = clamp((visibleRange.end - point.time) / fadeSec, 0, 1)
+    return Math.min(fadeIn, fadeOut)
+  }
+
+  return 1
 }
 
 function measureCharacterLabelWidth(text: string) {
@@ -286,6 +413,7 @@ function buildCharacterLabelPlacements(
   viewportHeight: number,
   zoom: number,
   hoveredCharacterName: string | null,
+  fixedCharacterName: string | null,
 ) {
   const showAllLabels = zoom >= zoomSettings.labelThreshold
   const labelHeight = 16
@@ -303,13 +431,40 @@ function buildCharacterLabelPlacements(
       anchorY: screenY,
       alpha: sample.offline ? 0.42 : 1,
       width: measureCharacterLabelWidth(character.charName) + labelPaddingX * 2,
+      fixed: fixedCharacterName === character.charName,
     }))
-    .sort((a, b) => a.anchorY - b.anchorY)
 
   const placements: CharacterLabelPlacement[] = []
   const placed: Array<{ left: number; top: number; right: number; bottom: number }> = []
+  const fixedCandidate = candidates.find((candidate) => candidate.fixed)
+  let fixedPlacement: CharacterLabelPlacement | null = null
 
-  for (const candidate of candidates) {
+  if (fixedCandidate) {
+    const maxLeft = Math.max(2, viewportWidth - fixedCandidate.width - 2)
+    const maxTop = Math.max(2, viewportHeight - labelHeight - 2)
+    const left = clamp(fixedCandidate.anchorX + labelOffsetX, 2, maxLeft)
+    const top = clamp(fixedCandidate.anchorY - labelOffsetY, 2, maxTop)
+    fixedPlacement = {
+      charName: fixedCandidate.charName,
+      anchorX: fixedCandidate.anchorX,
+      anchorY: fixedCandidate.anchorY,
+      left,
+      top,
+      width: fixedCandidate.width,
+      height: labelHeight,
+      alpha: fixedCandidate.alpha,
+    }
+    placed.push({
+      left,
+      top,
+      right: left + fixedCandidate.width,
+      bottom: top + labelHeight,
+    })
+  }
+
+  for (const candidate of candidates
+    .filter((entry) => !entry.fixed)
+    .sort((a, b) => a.anchorY - b.anchorY)) {
     const maxLeft = Math.max(2, viewportWidth - candidate.width - 2)
     const maxTop = Math.max(2, viewportHeight - labelHeight - 2)
     const left = clamp(candidate.anchorX + labelOffsetX, 2, maxLeft)
@@ -346,6 +501,10 @@ function buildCharacterLabelPlacements(
       right: left + candidate.width,
       bottom: top + labelHeight,
     })
+  }
+
+  if (fixedPlacement) {
+    placements.push(fixedPlacement)
   }
 
   return placements
@@ -949,31 +1108,6 @@ function rgbaFromHex(hex: string, alpha: number) {
   return `rgba(${r}, ${g}, ${b}, ${clamp(alpha, 0, 1)})`
 }
 
-function sampleGradient(
-  stops: ReadonlyArray<[number, number, number]>,
-  value: number,
-): [number, number, number] {
-  if (stops.length === 0) {
-    return [0, 0, 0]
-  }
-  if (stops.length === 1) {
-    return stops[0]
-  }
-
-  const normalized = clamp(value, 0, 1)
-  const scaled = normalized * (stops.length - 1)
-  const index = Math.floor(scaled)
-  const local = scaled - index
-  const left = stops[index]
-  const right = stops[Math.min(index + 1, stops.length - 1)]
-
-  return [
-    Math.round(left[0] + (right[0] - left[0]) * local),
-    Math.round(left[1] + (right[1] - left[1]) * local),
-    Math.round(left[2] + (right[2] - left[2]) * local),
-  ]
-}
-
 function drawLabel(
   context: CanvasRenderingContext2D,
   text: string,
@@ -1071,6 +1205,26 @@ function formatMetric(value: number | null, fractionDigits = 0) {
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits,
   })
+}
+
+function getEventKindLabel(kind: EventKind) {
+  if (kind === 'respawn') {
+    return 'リスポーン'
+  }
+  if (kind === 'death') {
+    return '死亡位置'
+  }
+  return 'ログアウト?'
+}
+
+function getEventTimeLabel(kind: EventKind) {
+  if (kind === 'respawn') {
+    return 'リスポーン時刻'
+  }
+  if (kind === 'death') {
+    return '死亡時刻'
+  }
+  return 'ログアウト?時刻'
 }
 
 function getNearestOnlineTime(character: CharacterTrack, currentTime: number) {
@@ -1192,58 +1346,6 @@ function getCharacterListState(
   return 'inactive'
 }
 
-function buildHeatmap(
-  characters: CharacterTrack[],
-  rangeStart: number,
-  rangeEnd: number,
-  cellSize: number,
-): HeatmapData {
-  const cellCounter = new Map<string, number>()
-
-  for (const character of characters) {
-    const times = character.track.t
-    const xs = character.track.x
-    const ys = character.track.y
-    if (times.length === 0 || xs.length !== times.length || ys.length !== times.length) {
-      continue
-    }
-
-    const start = lowerBound(times, rangeStart)
-    const endExclusive = upperBound(times, rangeEnd)
-    for (let i = start; i < endExclusive; i += 1) {
-      const cellX = Math.floor(xs[i] / cellSize)
-      const cellY = Math.floor(ys[i] / cellSize)
-      const key = `${cellX}:${cellY}`
-      cellCounter.set(key, (cellCounter.get(key) ?? 0) + 1)
-    }
-  }
-
-  const values = [...cellCounter.values()]
-  if (values.length === 0) {
-    return { cells: [], p95: 1, maxCount: 0 }
-  }
-
-  const sorted = [...values].sort((a, b) => a - b)
-  const p95Index = Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * 0.95))
-  const p95 = Math.max(sorted[p95Index], 1)
-  const maxCount = sorted[sorted.length - 1]
-
-  const cells: HeatmapCell[] = []
-  for (const [key, count] of cellCounter.entries()) {
-    const [rawX, rawY] = key.split(':')
-    const cellX = Number(rawX)
-    const cellY = Number(rawY)
-    cells.push({
-      x: cellX * cellSize,
-      y: cellY * cellSize,
-      count,
-      normalized: clamp(count / p95, 0, 1),
-    })
-  }
-
-  return { cells, p95, maxCount }
-}
-
 function resolveViewModeFromHash(): ViewMode {
   return window.location.hash === MAP_HASH ? 'map' : 'intro'
 }
@@ -1269,6 +1371,11 @@ function App() {
   const [expandedPlayers, setExpandedPlayers] = useState<Record<string, boolean>>({})
   const [showTips, setShowTips] = useState(true)
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('normal')
+  const [visibleEventKinds, setVisibleEventKinds] = useState<Record<EventKind, boolean>>({
+    respawn: true,
+    death: true,
+    logout: true,
+  })
   const [seekbarMode, setSeekbarMode] = useState<SeekbarMode>('online')
   const [speedMenuOpen, setSpeedMenuOpen] = useState(false)
   const [visibility, setVisibility] = useState<Record<string, boolean>>({})
@@ -1280,11 +1387,9 @@ function App() {
   const [windowWidthSec, setWindowWidthSec] = useState(24 * 60 * 60)
   const [focusWindowStart, setFocusWindowStart] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1)
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(64)
   const [trailEnabled, setTrailEnabled] = useState(true)
   const [allTimeTrail, setAllTimeTrail] = useState(false)
-
-  const [heatmapCellSize] = useState<number>(heatmapSettings.defaultCellSize)
 
   const [iconColor] = useState<string>(viewerColorSettings.iconColorDefault)
   const [trailColor] = useState<string>(viewerColorSettings.trailColorDefault)
@@ -1296,19 +1401,9 @@ function App() {
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
   const [hoveredCharacterName, setHoveredCharacterName] = useState<string | null>(null)
   const [characterHoverTooltip, setCharacterHoverTooltip] =
-    useState<DeathHoverTooltip | null>(null)
-  const [hoveredRespawnCharacterName, setHoveredRespawnCharacterName] =
-    useState<string | null>(null)
-  const [hoveredDeathCharacterName, setHoveredDeathCharacterName] =
-    useState<string | null>(null)
-  const [respawnHoverTooltip, setRespawnHoverTooltip] =
-    useState<DeathHoverTooltip | null>(null)
-  const [deathHoverTooltip, setDeathHoverTooltip] =
-    useState<DeathHoverTooltip | null>(null)
-  const statusCharacterName =
-    overlayMode === 'death' && hoveredDeathCharacterName
-      ? hoveredDeathCharacterName
-      : selectedCharacterName
+    useState<CharacterHoverTooltip | null>(null)
+  const [eventHoverTooltip, setEventHoverTooltip] = useState<EventHoverTooltip | null>(null)
+  const statusCharacterName = selectedCharacterName
 
   const [mapManifestStatus, setMapManifestStatus] = useState<LoadStatus>('idle')
   const [mapManifest, setMapManifest] = useState<MapAssetManifest | null>(null)
@@ -1322,6 +1417,7 @@ function App() {
   const lowResImageRef = useRef<HTMLImageElement | null>(null)
   const tileCacheRef = useRef<Map<string, HTMLImageElement | 'loading' | 'error'>>(new Map())
   const focusScrubRef = useRef<HTMLDivElement | null>(null)
+  const overviewTrackRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{
     pointerId: number
     startX: number
@@ -1331,6 +1427,15 @@ function App() {
     hitCharacterName: string | null
   } | null>(null)
   const focusDragPointerRef = useRef<number | null>(null)
+  const overviewScrubPointerRef = useRef<number | null>(null)
+  const overviewWindowDragRef = useRef<{
+    pointerId: number
+    startClientX: number
+    startWindowStart: number
+    width: number
+    currentOffset: number
+  } | null>(null)
+  const lastNonFullWindowWidthRef = useRef(24 * 60 * 60)
   const pressedKeysRef = useRef(new Set<string>())
   const keyHoldStartRef = useRef<number | null>(null)
   const keysHandledRef = useRef(false)
@@ -1359,21 +1464,24 @@ function App() {
     )
   }, [tracksData])
 
-  const trackedPlayerCharacters = useMemo(() => {
+  const trackingAnchorCharacter = useMemo(() => {
     if (!trackedCharacterName) {
-      return []
+      return null
     }
-    const tracked = allCharacters.find((character) => character.charName === trackedCharacterName)
-    if (!tracked) {
+    return allCharacters.find((character) => character.charName === trackedCharacterName) ?? null
+  }, [allCharacters, trackedCharacterName])
+
+  const trackedPlayerCharacters = useMemo(() => {
+    if (!trackingAnchorCharacter) {
       return []
     }
 
-    const playerName = tracked.playerName.trim()
+    const playerName = trackingAnchorCharacter.playerName.trim()
     if (!playerName) {
-      return [tracked]
+      return [trackingAnchorCharacter]
     }
     return allCharacters.filter((character) => character.playerName.trim() === playerName)
-  }, [allCharacters, trackedCharacterName])
+  }, [allCharacters, trackingAnchorCharacter])
 
   const onlineTimelineIntervals = useMemo(
     () =>
@@ -1491,6 +1599,7 @@ function App() {
         setFocusWindowStart(0)
         setZoom(zoomSettings.minZoom)
         setCameraCenter(getBoundsCenter(loadedBounds))
+        setIsPlaying(true)
 
         setLoadStatus('ready')
 
@@ -1662,13 +1771,8 @@ function App() {
       setHoveredCharacterName(null)
       setCharacterHoverTooltip(null)
     }
-    if (overlayMode !== 'respawn') {
-      setHoveredRespawnCharacterName(null)
-      setRespawnHoverTooltip(null)
-    }
-    if (overlayMode !== 'death') {
-      setHoveredDeathCharacterName(null)
-      setDeathHoverTooltip(null)
+    if (overlayMode !== 'normal' && overlayMode !== 'events') {
+      setEventHoverTooltip(null)
     }
   }, [overlayMode])
 
@@ -1744,6 +1848,13 @@ function App() {
   ])
 
   useEffect(() => {
+    const width = clamp(windowWidthSec, minWindowSec, timelineDuration)
+    if (width < timelineDuration) {
+      lastNonFullWindowWidthRef.current = width
+    }
+  }, [minWindowSec, timelineDuration, windowWidthSec])
+
+  useEffect(() => {
     const currentVirtualTime = mapRealToVirtualTime(currentTime, timelineSegments)
     setFocusWindowStart((prev) => {
       const width = clamp(windowWidthSec, minWindowSec, timelineDuration)
@@ -1783,15 +1894,32 @@ function App() {
 
       if (isPlaying) {
         let reachedEnd = false
-        setCurrentTime((prev) => {
-          const currentVirtual = mapRealToVirtualTime(prev, timelineSegments)
-          const nextVirtual = currentVirtual + playbackSpeed * deltaSec
-          if (nextVirtual >= timelineDuration) {
-            reachedEnd = true
-            return mapVirtualToRealTime(timelineDuration, timelineSegments)
-          }
-          return mapVirtualToRealTime(nextVirtual, timelineSegments)
-        })
+        if (overlayMode === 'events') {
+          setFocusWindowStart((prev) => {
+            const width = clamp(windowWidthSec, minWindowSec, timelineDuration)
+            const maxStart = Math.max(0, timelineDuration - width)
+            if (width >= timelineDuration || maxStart <= 0) {
+              reachedEnd = true
+              return 0
+            }
+            const nextStart = prev + playbackSpeed * deltaSec
+            if (nextStart >= maxStart) {
+              reachedEnd = true
+              return maxStart
+            }
+            return clamp(nextStart, 0, maxStart)
+          })
+        } else {
+          setCurrentTime((prev) => {
+            const currentVirtual = mapRealToVirtualTime(prev, timelineSegments)
+            const nextVirtual = currentVirtual + playbackSpeed * deltaSec
+            if (nextVirtual >= timelineDuration) {
+              reachedEnd = true
+              return mapVirtualToRealTime(timelineDuration, timelineSegments)
+            }
+            return mapVirtualToRealTime(nextVirtual, timelineSegments)
+          })
+        }
         if (reachedEnd) {
           setIsPlaying(false)
         }
@@ -1802,7 +1930,15 @@ function App() {
 
     rafId = window.requestAnimationFrame(onFrame)
     return () => window.cancelAnimationFrame(rafId)
-  }, [isPlaying, playbackSpeed, timelineDuration, timelineSegments])
+  }, [
+    isPlaying,
+    minWindowSec,
+    overlayMode,
+    playbackSpeed,
+    timelineDuration,
+    timelineSegments,
+    windowWidthSec,
+  ])
 
   useEffect(() => {
     if (!tracksData) {
@@ -2131,12 +2267,12 @@ function App() {
     allCharacters.length > 0 &&
     allCharacters.every((character) => visibility[character.charName] !== false)
 
-  const trackedCharacter = useMemo(() => {
-    if (!trackedCharacterName) {
-      return null
-    }
-    return allCharacters.find((character) => character.charName === trackedCharacterName) ?? null
-  }, [allCharacters, trackedCharacterName])
+  const trackedCharacter = useMemo(
+    () => selectTrackingCharacter(trackedPlayerCharacters, currentTime),
+    [currentTime, trackedPlayerCharacters],
+  )
+  const activeTrackedCharacterName = trackedCharacter?.charName ?? null
+  const sceneTime = overlayMode === 'normal' ? currentTime : period.start
 
   const cameraMetrics = useMemo(
     () =>
@@ -2189,9 +2325,12 @@ function App() {
   ])
 
   const renderedCharacters = useMemo(() => {
+    if (overlayMode !== 'normal') {
+      return []
+    }
     const rendered: RenderedCharacter[] = []
     for (const character of visibleCharacters) {
-      const sample = getPointAtTime(character, currentTime)
+      const sample = getPointAtTime(character, sceneTime)
       if (!sample || sample.beforeStart || sample.afterEnd) {
         continue
       }
@@ -2204,18 +2343,25 @@ function App() {
       })
     }
     return rendered
-  }, [cameraMetrics, currentTime, visibleCharacters])
+  }, [cameraMetrics, overlayMode, sceneTime, visibleCharacters])
   const characterLabelPlacements = useMemo(
-    () =>
-      buildCharacterLabelPlacements(
+    () => {
+      if (overlayMode !== 'normal') {
+        return []
+      }
+      return buildCharacterLabelPlacements(
         renderedCharacters,
         viewportSize.width,
         viewportSize.height,
         zoom,
         hoveredCharacterName,
-      ),
+        activeTrackedCharacterName,
+      )
+    },
     [
+      activeTrackedCharacterName,
       hoveredCharacterName,
+      overlayMode,
       renderedCharacters,
       viewportSize.height,
       viewportSize.width,
@@ -2224,22 +2370,18 @@ function App() {
   )
 
   const snapshotIndex = useMemo(() => buildSnapshotIndex(snapshotData), [snapshotData])
-  const hoveredCharacterSnapshotRecord = useMemo(() => {
-    if (!hoveredCharacterName) {
-      return null
+  const hoveredCharacterEntries = useMemo<HoveredCharacterEntry[]>(() => {
+    if (!characterHoverTooltip) {
+      return []
     }
-    const records = snapshotIndex.get(hoveredCharacterName) ?? []
-    return pickSnapshotRecord(records)
-  }, [hoveredCharacterName, snapshotIndex])
-  const hoveredRenderedCharacter = useMemo(
-    () =>
-      hoveredCharacterName
-        ? renderedCharacters.find(
-            ({ character }) => character.charName === hoveredCharacterName,
-          ) ?? null
-        : null,
-    [hoveredCharacterName, renderedCharacters],
-  )
+
+    return characterHoverTooltip.charNames.map((charName) => ({
+      charName,
+      renderedCharacter:
+        renderedCharacters.find(({ character }) => character.charName === charName) ?? null,
+      snapshotRecord: pickSnapshotRecord(snapshotIndex.get(charName) ?? []),
+    }))
+  }, [characterHoverTooltip, renderedCharacters, snapshotIndex])
   const selectedSnapshotRecord = useMemo(() => {
     if (!statusCharacterName) {
       return null
@@ -2267,90 +2409,72 @@ function App() {
     windowWidthSec,
   ])
 
-  const heatmapData = useMemo(() => {
-    if (overlayMode !== 'heatmap' || !tracksData) {
-      return null
+  const allEventPoints = useMemo(() => {
+    const points: EventPoint[] = []
+    for (const character of allCharacters) {
+      if (character.track.t.length > 0) {
+        const spawnTime = character.track.t[0] ?? character.life.start
+        points.push({
+          id: `respawn:${character.charName}:${spawnTime}`,
+          kind: 'respawn',
+          charName: character.charName,
+          playerName: character.playerName,
+          x: character.track.x[0],
+          y: character.track.y[0],
+          time: spawnTime,
+        })
+      }
+
+      const terminalInfo = characterTerminalInfoMap.get(character.charName)
+      if (
+        terminalInfo &&
+        Number.isFinite(terminalInfo.x) &&
+        Number.isFinite(terminalInfo.y)
+      ) {
+        points.push({
+          id: `${terminalInfo.terminalType}:${character.charName}:${terminalInfo.terminalTime}`,
+          kind: terminalInfo.terminalType,
+          charName: character.charName,
+          playerName: terminalInfo.playerName,
+          x: terminalInfo.x,
+          y: terminalInfo.y,
+          time: terminalInfo.terminalTime,
+        })
+      }
     }
-    return buildHeatmap(
-      allCharacters,
-      overlayWindowRange.start,
-      overlayWindowRange.end,
-      heatmapCellSize,
+    return points
+  }, [allCharacters, characterTerminalInfoMap])
+  const activeEventPoints = useMemo(() => {
+    const filtered = allEventPoints.filter(
+      (point) =>
+        visibleEventKinds[point.kind] &&
+        visibility[point.charName] !== false &&
+        Number.isFinite(point.x) &&
+        Number.isFinite(point.y),
     )
+
+    if (overlayMode === 'events') {
+      return filtered.filter(
+        (point) =>
+          point.time >= overlayWindowRange.start && point.time <= overlayWindowRange.end,
+      )
+    }
+    if (overlayMode === 'normal') {
+      return filtered.filter(
+        (point) =>
+          point.time <= currentTime && currentTime <= point.time + EVENT_MARKER_DISPLAY_SEC,
+      )
+    }
+    return []
   }, [
-    allCharacters,
-    heatmapCellSize,
+    allEventPoints,
+    currentTime,
     overlayMode,
     overlayWindowRange.end,
     overlayWindowRange.start,
-    tracksData,
+    visibility,
+    visibleEventKinds,
   ])
-
-  const respawnPoints = useMemo(
-    () =>
-      allCharacters
-        .filter((character) => character.track.t.length > 0)
-        .map((character) => {
-          const spawnTime = character.track.t[0] ?? character.life.start
-          return {
-            charName: character.charName,
-            playerName: character.playerName,
-            x: character.track.x[0],
-            y: character.track.y[0],
-            spawnTime,
-          }
-        })
-        .filter(
-          (point) =>
-            point.spawnTime >= overlayWindowRange.start &&
-            point.spawnTime <= overlayWindowRange.end,
-        ),
-    [allCharacters, overlayWindowRange.end, overlayWindowRange.start],
-  )
-  const hoveredRespawnPoint = useMemo(() => {
-    if (!hoveredRespawnCharacterName) {
-      return null
-    }
-    return respawnPoints.find((point) => point.charName === hoveredRespawnCharacterName) ?? null
-  }, [hoveredRespawnCharacterName, respawnPoints])
-  const hoveredRespawnSnapshotRecord = useMemo(() => {
-    if (!hoveredRespawnCharacterName) {
-      return null
-    }
-    const records = snapshotIndex.get(hoveredRespawnCharacterName) ?? []
-    return pickSnapshotRecord(records)
-  }, [hoveredRespawnCharacterName, snapshotIndex])
-
-  const deathPoints = useMemo(
-    () => {
-      return [...characterTerminalInfoMap.values()].filter(
-        (point) =>
-          Number.isFinite(point.x) &&
-          Number.isFinite(point.y) &&
-          point.terminalTime >= overlayWindowRange.start &&
-          point.terminalTime <= overlayWindowRange.end,
-      )
-    },
-    [characterTerminalInfoMap, overlayWindowRange.end, overlayWindowRange.start],
-  )
-  const hoveredDeathPoint = useMemo(() => {
-    if (!hoveredDeathCharacterName) {
-      return null
-    }
-    return deathPoints.find((point) => point.charName === hoveredDeathCharacterName) ?? null
-  }, [deathPoints, hoveredDeathCharacterName])
-  const hoveredDeathSnapshotRecord = useMemo(() => {
-    if (!hoveredDeathCharacterName) {
-      return null
-    }
-    const records = snapshotIndex.get(hoveredDeathCharacterName) ?? []
-    return pickSnapshotRecord(records)
-  }, [hoveredDeathCharacterName, snapshotIndex])
-
-  const heatmapStopRgb = useMemo(
-    () => viewerColorSettings.heatmapColorStops.map((hex) => hexToRgb(hex)),
-    [],
-  )
 
   const currentTimeVirtual = useMemo(
     () => mapRealToVirtualTime(currentTime, timelineSegments),
@@ -2390,6 +2514,10 @@ function App() {
     }),
     [timeWindow.end, timeWindow.start, timelineSegments],
   )
+  const timelineStatusLabel =
+    overlayMode === 'events'
+      ? `${formatJst(timeWindowReal.start)} - ${formatJst(timeWindowReal.end)}`
+      : formatJst(currentTime)
 
   const scaleSliderValue = useMemo(() => {
     const minLog = Math.log(minWindowSec)
@@ -2400,7 +2528,8 @@ function App() {
     return clamp(((Math.log(windowWidthSec) - minLog) / (maxLog - minLog)) * 1000, 0, 1000)
   }, [minWindowSec, timelineDuration, windowWidthSec])
 
-  const activeTrackedCharacterName = trackedCharacter?.charName ?? null
+  const activeTrackedLabel =
+    trackedCharacter?.playerName.trim() || trackedCharacter?.charName || null
   const focusWindowStartPercent = clamp(
     (timeWindow.start / timelineDuration) * 100,
     0,
@@ -2437,6 +2566,7 @@ function App() {
     if (overlayMode === 'normal') {
       return
     }
+    setIsPlaying(false)
     setSeekbarMode('full')
     setWindowWidthSec(timelineDuration)
     setFocusWindowStart(0)
@@ -2471,9 +2601,16 @@ function App() {
   const statusWindowStyle = statusWindowPosition
     ? { left: `${statusWindowPosition.x}px`, top: `${statusWindowPosition.y}px` }
     : undefined
-  const characterTooltipStyle = getMapHoverTooltipStyle(characterHoverTooltip)
-  const respawnTooltipStyle = getMapHoverTooltipStyle(respawnHoverTooltip)
-  const deathTooltipStyle = getMapHoverTooltipStyle(deathHoverTooltip)
+  const characterTooltipStyle = getMapHoverTooltipStyle(
+    characterHoverTooltip,
+    Math.min(520, 44 + Math.max(hoveredCharacterEntries.length, 1) * 116),
+    280,
+  )
+  const eventTooltipStyle = getMapHoverTooltipStyle(
+    eventHoverTooltip,
+    Math.min(520, 44 + (eventHoverTooltip?.points.length ?? 1) * 116),
+    280,
+  )
 
   const requestTileImage = (tileUrl: string) => {
     const cache = tileCacheRef.current
@@ -2526,6 +2663,46 @@ function App() {
     setIsPlaying(false)
   }
 
+  const toggleEventKindVisibility = (kind: EventKind) => {
+    setVisibleEventKinds((prev) => ({
+      ...prev,
+      [kind]: !prev[kind],
+    }))
+  }
+
+  const handlePlaybackToggle = () => {
+    if (isPlaying) {
+      setIsPlaying(false)
+      return
+    }
+
+    if (overlayMode !== 'events') {
+      setIsPlaying(true)
+      return
+    }
+
+    const width = clamp(windowWidthSec, minWindowSec, timelineDuration)
+    let nextWidth = width
+    if (width >= timelineDuration) {
+      const restoredWidth = clamp(
+        lastNonFullWindowWidthRef.current,
+        minWindowSec,
+        timelineDuration,
+      )
+      if (restoredWidth < timelineDuration) {
+        nextWidth = restoredWidth
+        const currentVirtual = mapRealToVirtualTime(currentTime, timelineSegments)
+        const maxStart = Math.max(0, timelineDuration - restoredWidth)
+        setWindowWidthSec(restoredWidth)
+        setFocusWindowStart(clamp(currentVirtual - restoredWidth / 2, 0, maxStart))
+      }
+    }
+
+    if (nextWidth < timelineDuration) {
+      setIsPlaying(true)
+    }
+  }
+
   const beginTrackingCharacter = (charName: string) => {
     setTrackedCharacterName(charName)
     setSeekbarMode('tracked')
@@ -2540,6 +2717,26 @@ function App() {
     setVisibility((prev) => {
       const next = { ...prev }
       for (const character of allCharacters) {
+        next[character.charName] = nextVisible
+      }
+      return next
+    })
+  }
+
+  const setCharacterVisibility = (charName: string, nextVisible: boolean) => {
+    setVisibility((prev) => ({
+      ...prev,
+      [charName]: nextVisible,
+    }))
+  }
+
+  const setCharactersVisibility = (
+    characters: CharacterTrack[],
+    nextVisible: boolean,
+  ) => {
+    setVisibility((prev) => {
+      const next = { ...prev }
+      for (const character of characters) {
         next[character.charName] = nextVisible
       }
       return next
@@ -2603,6 +2800,113 @@ function App() {
     event.currentTarget.releasePointerCapture(event.pointerId)
   }
 
+  const moveOverviewWindowByClientX = (clientX: number) => {
+    const dragState = overviewWindowDragRef.current
+    const track = overviewTrackRef.current
+    if (!dragState || !track) {
+      return
+    }
+
+    const rect = track.getBoundingClientRect()
+    if (rect.width <= 0) {
+      return
+    }
+
+    const deltaVirtual =
+      ((clientX - dragState.startClientX) / rect.width) * timelineDuration
+    const maxStart = Math.max(0, timelineDuration - dragState.width)
+    const nextStart = clamp(dragState.startWindowStart + deltaVirtual, 0, maxStart)
+    const nextCurrentVirtual = clamp(
+      nextStart + dragState.currentOffset,
+      nextStart,
+      nextStart + dragState.width,
+    )
+
+    setFocusWindowStart(nextStart)
+    setCurrentTime(mapVirtualToRealTime(nextCurrentVirtual, timelineSegments))
+  }
+
+  const handleOverviewWindowPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || timelineDuration <= timeWindow.end - timeWindow.start) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    stopPlaybackForManualControl()
+
+    overviewWindowDragRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startWindowStart: timeWindow.start,
+      width: timeWindow.end - timeWindow.start,
+      currentOffset: clamp(currentTimeVirtual - timeWindow.start, 0, timeWindow.end - timeWindow.start),
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handleOverviewWindowPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (overviewWindowDragRef.current?.pointerId !== event.pointerId) {
+      return
+    }
+    event.preventDefault()
+    moveOverviewWindowByClientX(event.clientX)
+  }
+
+  const handleOverviewWindowPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (overviewWindowDragRef.current?.pointerId !== event.pointerId) {
+      return
+    }
+    overviewWindowDragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  const scrubOverviewByClientX = (clientX: number) => {
+    const target = overviewTrackRef.current
+    if (!target || timelineDuration <= 0) {
+      return
+    }
+    const rect = target.getBoundingClientRect()
+    if (rect.width <= 0) {
+      return
+    }
+
+    const ratio = clamp((clientX - rect.left) / rect.width, 0, 1)
+    const desiredVirtual = ratio * timelineDuration
+    setCurrentTime(mapVirtualToRealTime(desiredVirtual, timelineSegments))
+  }
+
+  const handleOverviewScrubPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    stopPlaybackForManualControl()
+    overviewScrubPointerRef.current = event.pointerId
+    event.currentTarget.setPointerCapture(event.pointerId)
+    scrubOverviewByClientX(event.clientX)
+  }
+
+  const handleOverviewScrubPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (overviewScrubPointerRef.current !== event.pointerId) {
+      return
+    }
+    event.preventDefault()
+    scrubOverviewByClientX(event.clientX)
+  }
+
+  const handleOverviewScrubPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (overviewScrubPointerRef.current !== event.pointerId) {
+      return
+    }
+    overviewScrubPointerRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
   const handleWheelZoom = (event: ReactWheelEvent<HTMLCanvasElement>) => {
     if (!tracksData || viewportSize.width <= 0 || viewportSize.height <= 0) {
       return
@@ -2643,31 +2947,50 @@ function App() {
     setCameraCenter(nextCenter)
   }
 
-  const findNormalCharacterAtCanvasPoint = (x: number, y: number) => {
+  const findNormalCharactersAtCanvasPoint = (x: number, y: number) => {
+    const hitNames: string[] = []
+    const seen = new Set<string>()
+
     for (let i = characterLabelPlacements.length - 1; i >= 0; i -= 1) {
       const label = characterLabelPlacements[i]
       if (
         x >= label.left &&
         x <= label.left + label.width &&
         y >= label.top &&
-        y <= label.top + label.height
+        y <= label.top + label.height &&
+        !seen.has(label.charName)
       ) {
-        return label.charName
+        seen.add(label.charName)
+        hitNames.push(label.charName)
       }
     }
 
-    let nearest: string | null = null
-    let bestDistance = HOVER_RADIUS_PX * HOVER_RADIUS_PX
-    for (const character of renderedCharacters) {
-      const dx = character.screenX - x
-      const dy = character.screenY - y
-      const distance = dx * dx + dy * dy
-      if (distance <= bestDistance) {
-        bestDistance = distance
-        nearest = character.character.charName
+    const iconHits = renderedCharacters
+      .map((character) => {
+        const dx = character.screenX - x
+        const dy = character.screenY - y
+        return {
+          charName: character.character.charName,
+          distance: dx * dx + dy * dy,
+          screenY: character.screenY,
+        }
+      })
+      .filter((entry) => entry.distance <= HOVER_RADIUS_PX * HOVER_RADIUS_PX)
+      .sort((a, b) => a.distance - b.distance || b.screenY - a.screenY)
+
+    for (const hit of iconHits) {
+      if (seen.has(hit.charName)) {
+        continue
       }
+      seen.add(hit.charName)
+      hitNames.push(hit.charName)
     }
-    return nearest
+
+    return hitNames
+  }
+
+  const findNormalCharacterAtCanvasPoint = (x: number, y: number) => {
+    return findNormalCharactersAtCanvasPoint(x, y)[0] ?? null
   }
 
   const findHoveredCharacter = (clientX: number, clientY: number) => {
@@ -2675,10 +2998,7 @@ function App() {
     if (!canvas) {
       setHoveredCharacterName(null)
       setCharacterHoverTooltip(null)
-      setHoveredRespawnCharacterName(null)
-      setHoveredDeathCharacterName(null)
-      setRespawnHoverTooltip(null)
-      setDeathHoverTooltip(null)
+      setEventHoverTooltip(null)
       return
     }
 
@@ -2686,82 +3006,51 @@ function App() {
     const x = clientX - rect.left
     const y = clientY - rect.top
 
-    if (overlayMode === 'respawn') {
-      let nearestRespawn: string | null = null
-      let bestRespawnDistance = HOVER_RADIUS_PX * HOVER_RADIUS_PX
-      for (const point of respawnPoints) {
-        const screen = worldToScreen(point.x, point.y, cameraMetrics)
-        const dx = screen.x - x
-        const dy = screen.y - y
-        const distance = dx * dx + dy * dy
-        if (distance <= bestRespawnDistance) {
-          bestRespawnDistance = distance
-          nearestRespawn = point.charName
-        }
+    if (overlayMode === 'normal' || overlayMode === 'events') {
+      const hoveredPoints = activeEventPoints
+        .map((point) => {
+          const screen = worldToScreen(point.x, point.y, cameraMetrics)
+          const dx = screen.x - x
+          const dy = screen.y - y
+          return { point, distance: dx * dx + dy * dy }
+        })
+        .filter((entry) => entry.distance <= HOVER_RADIUS_PX * HOVER_RADIUS_PX)
+        .sort((a, b) => b.point.time - a.point.time)
+        .map((entry) => entry.point)
+
+      if (hoveredPoints.length > 0) {
+        setHoveredCharacterName(null)
+        setCharacterHoverTooltip(null)
+        setEventHoverTooltip({
+          clientX,
+          clientY,
+          points: hoveredPoints,
+        })
+        return
       }
-      setHoveredCharacterName(null)
-      setCharacterHoverTooltip(null)
-      setHoveredRespawnCharacterName(nearestRespawn)
-      setHoveredDeathCharacterName(null)
-      setRespawnHoverTooltip(
-        nearestRespawn
-          ? {
-              charName: nearestRespawn,
-              clientX,
-              clientY,
-            }
-          : null,
-      )
-      setDeathHoverTooltip(null)
-      return
+
+      setEventHoverTooltip(null)
+      if (overlayMode === 'events') {
+        setHoveredCharacterName(null)
+        setCharacterHoverTooltip(null)
+        return
+      }
     }
 
-    if (overlayMode === 'death') {
-      let nearestDeath: string | null = null
-      let bestDeathDistance = HOVER_RADIUS_PX * HOVER_RADIUS_PX
-      for (const point of deathPoints) {
-        const screen = worldToScreen(point.x, point.y, cameraMetrics)
-        const dx = screen.x - x
-        const dy = screen.y - y
-        const distance = dx * dx + dy * dy
-        if (distance <= bestDeathDistance) {
-          bestDeathDistance = distance
-          nearestDeath = point.charName
-        }
-      }
-      setHoveredCharacterName(null)
-      setCharacterHoverTooltip(null)
-      setHoveredRespawnCharacterName(null)
-      setHoveredDeathCharacterName(nearestDeath)
-      setRespawnHoverTooltip(null)
-      setDeathHoverTooltip(
-        nearestDeath
-          ? {
-              charName: nearestDeath,
-              clientX,
-              clientY,
-            }
-          : null,
-      )
-      return
-    }
+    const hoveredCharacters = findNormalCharactersAtCanvasPoint(x, y)
+    const primaryCharacter = hoveredCharacters[0] ?? null
 
-    const nearest = findNormalCharacterAtCanvasPoint(x, y)
-
-    setHoveredCharacterName(nearest)
+    setHoveredCharacterName(primaryCharacter)
     setCharacterHoverTooltip(
-      nearest
+      hoveredCharacters.length > 0
         ? {
-            charName: nearest,
             clientX,
             clientY,
+            charNames: hoveredCharacters,
           }
         : null,
     )
-    setHoveredRespawnCharacterName(null)
-    setHoveredDeathCharacterName(null)
-    setRespawnHoverTooltip(null)
-    setDeathHoverTooltip(null)
+    setEventHoverTooltip(null)
   }
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -2816,10 +3105,7 @@ function App() {
       clearTrackingCharacter()
       setHoveredCharacterName(null)
       setCharacterHoverTooltip(null)
-      setHoveredRespawnCharacterName(null)
-      setHoveredDeathCharacterName(null)
-      setRespawnHoverTooltip(null)
-      setDeathHoverTooltip(null)
+      setEventHoverTooltip(null)
     }
     const worldDeltaX = deltaX / cameraMetrics.scale
     const worldDeltaY = deltaY / cameraMetrics.scale
@@ -2846,9 +3132,9 @@ function App() {
         setSelectedCharacterName(drag.hitCharacterName)
         setHoveredCharacterName(drag.hitCharacterName)
         setCharacterHoverTooltip({
-          charName: drag.hitCharacterName,
           clientX: event.clientX,
           clientY: event.clientY,
+          charNames: [drag.hitCharacterName],
         })
       }
       dragRef.current = null
@@ -2875,10 +3161,7 @@ function App() {
     if (!dragRef.current) {
       setHoveredCharacterName(null)
       setCharacterHoverTooltip(null)
-      setHoveredRespawnCharacterName(null)
-      setHoveredDeathCharacterName(null)
-      setRespawnHoverTooltip(null)
-      setDeathHoverTooltip(null)
+      setEventHoverTooltip(null)
     }
   }
 
@@ -3054,106 +3337,6 @@ function App() {
       }
     }
 
-    if (overlayMode === 'heatmap' && heatmapData) {
-      for (const cell of heatmapData.cells) {
-        const [r, g, b] = sampleGradient(heatmapStopRgb, cell.normalized)
-        const alpha = 0.15 + cell.normalized * 0.55
-        const x0 = (cell.x - cameraMetrics.minX) * cameraMetrics.scale
-        const y0 = (cell.y - cameraMetrics.minY) * cameraMetrics.scale
-        const size = heatmapCellSize * cameraMetrics.scale
-        if (
-          x0 > viewportSize.width ||
-          y0 > viewportSize.height ||
-          x0 + size < 0 ||
-          y0 + size < 0
-        ) {
-          continue
-        }
-        context.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`
-        context.fillRect(x0, y0, size, size)
-      }
-    }
-
-    if (overlayMode === 'respawn') {
-      const markerScale = getEventMarkerScale(zoom)
-      const radius = 4.1 * markerScale
-      context.lineWidth = Math.max(1.2, 1.2 * markerScale)
-      for (const point of respawnPoints) {
-        const screen = worldToScreen(point.x, point.y, cameraMetrics)
-        if (
-          screen.x < -radius - 4 ||
-          screen.y < -radius - 4 ||
-          screen.x > viewportSize.width + radius + 4 ||
-          screen.y > viewportSize.height + radius + 4
-        ) {
-          continue
-        }
-        context.fillStyle = 'rgba(24, 125, 56, 0.82)'
-        context.beginPath()
-        context.arc(screen.x, screen.y, radius, 0, Math.PI * 2)
-        context.fill()
-        context.strokeStyle = 'rgba(255, 255, 255, 0.72)'
-        context.beginPath()
-        context.arc(screen.x, screen.y, radius, 0, Math.PI * 2)
-        context.stroke()
-      }
-    }
-
-    if (overlayMode === 'death') {
-      const markerScale = getEventMarkerScale(zoom)
-      const crossHalf = 4 * markerScale
-      const logoutRadius = 5.2 * markerScale
-      for (const point of deathPoints) {
-        const screen = worldToScreen(point.x, point.y, cameraMetrics)
-        if (
-          screen.x < -logoutRadius - 4 ||
-          screen.y < -logoutRadius - 4 ||
-          screen.x > viewportSize.width + logoutRadius + 4 ||
-          screen.y > viewportSize.height + logoutRadius + 4
-        ) {
-          continue
-        }
-        if (point.terminalType === 'death') {
-          context.strokeStyle = 'rgba(20, 20, 20, 0.9)'
-          context.lineWidth = Math.max(2.2, 2.6 * markerScale)
-          context.beginPath()
-          context.moveTo(screen.x - crossHalf * 1.05, screen.y - crossHalf * 1.05)
-          context.lineTo(screen.x + crossHalf * 1.05, screen.y + crossHalf * 1.05)
-          context.moveTo(screen.x + crossHalf * 1.05, screen.y - crossHalf * 1.05)
-          context.lineTo(screen.x - crossHalf * 1.05, screen.y + crossHalf * 1.05)
-          context.stroke()
-
-          context.strokeStyle = 'rgba(178, 45, 45, 0.95)'
-          context.lineWidth = Math.max(1.4, 1.5 * markerScale)
-          context.beginPath()
-          context.moveTo(screen.x - crossHalf, screen.y - crossHalf)
-          context.lineTo(screen.x + crossHalf, screen.y + crossHalf)
-          context.moveTo(screen.x + crossHalf, screen.y - crossHalf)
-          context.lineTo(screen.x - crossHalf, screen.y + crossHalf)
-          context.stroke()
-        } else {
-          context.fillStyle = 'rgba(255, 255, 255, 0.94)'
-          context.beginPath()
-          context.arc(screen.x, screen.y, logoutRadius, 0, Math.PI * 2)
-          context.fill()
-
-          context.strokeStyle = 'rgba(188, 38, 38, 0.96)'
-          context.lineWidth = Math.max(1.5, 1.5 * markerScale)
-          context.beginPath()
-          context.arc(screen.x, screen.y, logoutRadius, 0, Math.PI * 2)
-          context.stroke()
-
-          context.fillStyle = 'rgba(20, 20, 20, 0.96)'
-          context.font = `bold ${Math.round(10 + (markerScale - 1) * 3)}px "Segoe UI", "Yu Gothic UI", sans-serif`
-          context.textAlign = 'center'
-          context.textBaseline = 'middle'
-          context.fillText('?', screen.x, screen.y + 0.3)
-        }
-      }
-      context.textAlign = 'start'
-      context.textBaseline = 'alphabetic'
-    }
-
     if (overlayMode === 'normal' && trailEnabled) {
       for (const { character } of renderedCharacters) {
         const times = character.track.t
@@ -3165,9 +3348,9 @@ function App() {
 
         const trailStart = allTimeTrail
           ? character.life.start
-          : Math.max(character.life.start, currentTime - TRAIL_WINDOW_SEC)
+          : Math.max(character.life.start, sceneTime - TRAIL_WINDOW_SEC)
         const startIndex = lowerBound(times, trailStart)
-        const endExclusive = upperBound(times, currentTime)
+        const endExclusive = upperBound(times, sceneTime)
         if (endExclusive - startIndex < 2) {
           continue
         }
@@ -3182,7 +3365,7 @@ function App() {
 
           const alpha = allTimeTrail
             ? 0.8
-            : clamp(1 - (currentTime - t1) / TRAIL_WINDOW_SEC, 0, 1)
+            : clamp(1 - (sceneTime - t1) / TRAIL_WINDOW_SEC, 0, 1)
           if (alpha <= 0.02) {
             continue
           }
@@ -3195,6 +3378,26 @@ function App() {
           context.lineTo(p1.x, p1.y)
           context.stroke()
         }
+      }
+    }
+
+    if ((overlayMode === 'normal' || overlayMode === 'events') && activeEventPoints.length > 0) {
+      const sortedEventPoints = [...activeEventPoints].sort((a, b) => a.time - b.time)
+      for (const point of sortedEventPoints) {
+        const markerAlpha = getEventMarkerAlpha(
+          point,
+          overlayMode,
+          currentTime,
+          overlayWindowRange,
+        )
+        drawEventMarker(
+          context,
+          point,
+          cameraMetrics,
+          viewportSize,
+          zoom,
+          markerAlpha,
+        )
       }
     }
 
@@ -3231,21 +3434,19 @@ function App() {
     }
   }, [
     activeTrackedCharacterName,
+    activeEventPoints,
     allTimeTrail,
     bounds,
     cameraMetrics,
-    currentTime,
-    deathPoints,
-    heatmapCellSize,
-    heatmapData,
-    heatmapStopRgb,
     iconColor,
     lowResStatus,
     mapManifest,
+    overlayWindowRange,
     overlayMode,
     characterLabelPlacements,
+    currentTime,
     renderedCharacters,
-    respawnPoints,
+    sceneTime,
     selectedTileLevel,
     tileCacheTick,
     trailColor,
@@ -3317,14 +3518,6 @@ function App() {
                     <h2>{listMode === 'player' ? 'プレイヤー一覧' : 'キャラクター一覧'}</h2>
                   </div>
                   <div className="panel-controls">
-                    <label className="master-visibility">
-                      <input
-                        type="checkbox"
-                        checked={allCharactersChecked}
-                        onChange={(event) => setAllVisibility(event.target.checked)}
-                      />
-                      全キャラ表示
-                    </label>
                     <div className="list-mode-switch">
                       <button
                         className={listMode === 'player' ? 'primary-button small' : 'secondary-button small'}
@@ -3351,43 +3544,79 @@ function App() {
                     />
                   </div>
 
+                  <div className="list-header-row">
+                    <div className="list-header-spacer" />
+                    <label className="list-master-visibility">
+                      <span className="list-master-visibility-label">全キャラ表示</span>
+                      <input
+                        type="checkbox"
+                        checked={allCharactersChecked}
+                        onChange={(event) => setAllVisibility(event.target.checked)}
+                        aria-label="全キャラ表示"
+                      />
+                    </label>
+                  </div>
+
                   <div className="player-list flat-list">
                     {listMode === 'character' &&
                       panelCharacters.map((row) => (
-                        <button
-                          className={`character-line ${row.state} ${
-                            selectedCharacterName === row.character.charName ? 'selected' : ''
-                          } ${row.visible ? '' : 'hidden'}`}
+                        <div
+                          className={`character-row ${row.visible ? '' : 'hidden'}`}
                           key={row.character.charName}
-                          onClick={() => {
-                            setSelectedCharacterName(row.character.charName)
-                            beginTrackingCharacter(row.character.charName)
-                            setHoveredCharacterName(null)
-                            if (row.state === 'inactive') {
-                              const jumpTime = getNearestOnlineTime(
-                                row.character,
-                                currentTime,
-                              )
-                              if (jumpTime != null) {
-                                stopPlaybackForManualControl()
-                                setCurrentTime(clamp(jumpTime, period.start, period.end))
-                              }
-                            }
-                          }}
                         >
-                          <span className="character-name">{row.character.charName}</span>
-                          <span className="line-meta">
-                            <span className="life-range">
-                              {formatJstShort(row.character.life.start)} -{' '}
-                              {formatJstShort(row.character.life.end)}
+                          <button
+                            className={`character-line ${row.state} ${
+                              selectedCharacterName === row.character.charName ? 'selected' : ''
+                            }`}
+                            onClick={() => {
+                              setSelectedCharacterName(row.character.charName)
+                              beginTrackingCharacter(row.character.charName)
+                              setHoveredCharacterName(null)
+                              if (row.state === 'inactive') {
+                                const jumpTime = getNearestOnlineTime(
+                                  row.character,
+                                  currentTime,
+                                )
+                                if (jumpTime != null) {
+                                  stopPlaybackForManualControl()
+                                  setCurrentTime(clamp(jumpTime, period.start, period.end))
+                                }
+                              }
+                            }}
+                          >
+                            <span className="character-name">{row.character.charName}</span>
+                            <span className="line-meta">
+                              <span className="life-range">
+                                {formatJstShort(row.character.life.start)} -{' '}
+                                {formatJstShort(row.character.life.end)}
+                              </span>
                             </span>
-                          </span>
-                        </button>
+                          </button>
+                          <label
+                            className="row-visibility-toggle"
+                            onClick={(event) => event.stopPropagation()}
+                            aria-label={`${row.character.charName} の表示切替`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={row.visible}
+                              onChange={(event) =>
+                                setCharacterVisibility(
+                                  row.character.charName,
+                                  event.target.checked,
+                                )
+                              }
+                            />
+                          </label>
+                        </div>
                       ))}
 
                     {listMode === 'player' &&
                       panelPlayers.map((row) => {
                         const expanded = expandedPlayers[row.playerName] === true
+                        const rowChecked = row.allCharacters.every(
+                          (character) => visibility[character.charName] !== false,
+                        )
                         return (
                           <div
                             className={`player-entry ${row.visible ? '' : 'hidden'}`}
@@ -3398,23 +3627,26 @@ function App() {
                                 row.active ? 'selected' : ''
                               }`}
                             >
-                              <button
-                                className="player-expand-button"
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  setExpandedPlayers((prev) => ({
-                                    ...prev,
-                                    [row.playerName]: !expanded,
-                                  }))
-                                }}
-                                aria-label={
-                                  expanded
-                                    ? `${row.playerName} のキャラを閉じる`
-                                    : `${row.playerName} のキャラを開く`
-                                }
-                              >
-                                {expanded ? '▲' : '▼'}
-                              </button>
+                              <div className="player-line-leading">
+                                <span className="count-badge">{row.totalCount}</span>
+                                <button
+                                  className="player-expand-button"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    setExpandedPlayers((prev) => ({
+                                      ...prev,
+                                      [row.playerName]: !expanded,
+                                    }))
+                                  }}
+                                  aria-label={
+                                    expanded
+                                      ? `${row.playerName} のキャラを閉じる`
+                                      : `${row.playerName} のキャラを開く`
+                                  }
+                                >
+                                  {expanded ? '▲' : '▼'}
+                                </button>
+                              </div>
                               <button
                                 className="player-main-button"
                                 onClick={() => {
@@ -3441,18 +3673,33 @@ function App() {
                                     }
                                   }
                                 }}
-                              >
-                                <span className="player-name-wrap">
-                                  <span className="player-name">{row.playerName}</span>
-                                  <span className="player-current-character">
-                                    ({row.currentCharacterName})
+                                >
+                                  <span className="player-name-wrap">
+                                    <span className="player-name">{row.playerName}</span>
+                                    <span className="player-current-character">
+                                      ({row.currentCharacterName})
                                   </span>
                                   {row.state === 'dead' && (
                                     <span className="new-character-tag">NewCheracter!!</span>
                                   )}
                                 </span>
-                                <span className="count-badge">{row.totalCount}</span>
                               </button>
+                              <label
+                                className="row-visibility-toggle"
+                                onClick={(event) => event.stopPropagation()}
+                                aria-label={`${row.playerName} の表示切替`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={rowChecked}
+                                  onChange={(event) =>
+                                    setCharactersVisibility(
+                                      row.allCharacters,
+                                      event.target.checked,
+                                    )
+                                  }
+                                />
+                              </label>
                             </div>
 
                             {expanded && (
@@ -3469,39 +3716,61 @@ function App() {
                                   const childVisible =
                                     visibility[character.charName] !== false
                                   return (
-                                    <button
-                                      className={`child-character ${childState} ${
-                                        selectedCharacterName === character.charName
-                                          ? 'selected'
-                                          : ''
-                                      } ${childVisible ? '' : 'hidden'}`}
+                                    <div
+                                      className={`child-character-row ${
+                                        childVisible ? '' : 'hidden'
+                                      }`}
                                       key={character.charName}
-                                      onClick={() => {
-                                        setSelectedCharacterName(character.charName)
-                                        beginTrackingCharacter(character.charName)
-                                        setHoveredCharacterName(null)
-                                        if (childState === 'inactive') {
-                                          const jumpTime = getNearestOnlineTime(
-                                            character,
-                                            currentTime,
-                                          )
-                                          if (jumpTime != null) {
-                                            stopPlaybackForManualControl()
-                                            setCurrentTime(
-                                              clamp(jumpTime, period.start, period.end),
+                                    >
+                                      <button
+                                        className={`child-character ${childState} ${
+                                          selectedCharacterName === character.charName
+                                            ? 'selected'
+                                            : ''
+                                        }`}
+                                        onClick={() => {
+                                          setSelectedCharacterName(character.charName)
+                                          beginTrackingCharacter(character.charName)
+                                          setHoveredCharacterName(null)
+                                          if (childState === 'inactive') {
+                                            const jumpTime = getNearestOnlineTime(
+                                              character,
+                                              currentTime,
+                                            )
+                                            if (jumpTime != null) {
+                                              stopPlaybackForManualControl()
+                                              setCurrentTime(
+                                                clamp(jumpTime, period.start, period.end),
+                                              )
+                                            }
+                                          }
+                                        }}
+                                      >
+                                        <span className="character-name">
+                                          {character.charName}
+                                        </span>
+                                        <span className="life-range">
+                                          {formatJstShort(character.life.start)} -{' '}
+                                          {formatJstShort(character.life.end)}
+                                        </span>
+                                      </button>
+                                      <label
+                                        className="row-visibility-toggle"
+                                        onClick={(event) => event.stopPropagation()}
+                                        aria-label={`${character.charName} の表示切替`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={childVisible}
+                                          onChange={(event) =>
+                                            setCharacterVisibility(
+                                              character.charName,
+                                              event.target.checked,
                                             )
                                           }
-                                        }
-                                      }}
-                                    >
-                                      <span className="character-name">
-                                        {character.charName}
-                                      </span>
-                                      <span className="life-range">
-                                        {formatJstShort(character.life.start)} -{' '}
-                                        {formatJstShort(character.life.end)}
-                                      </span>
-                                    </button>
+                                        />
+                                      </label>
+                                    </div>
                                   )
                                 })}
                               </div>
@@ -3516,30 +3785,6 @@ function App() {
               <section className="map-panel">
                 <div className="map-toolbar">
                   <div className="toolbar-group">
-                    <button
-                      className={overlayMode === 'normal' ? 'primary-button small' : 'secondary-button small'}
-                      onClick={() => setOverlayMode('normal')}
-                    >
-                      通常
-                    </button>
-                    <button
-                      className={overlayMode === 'heatmap' ? 'primary-button small' : 'secondary-button small'}
-                      onClick={() => setOverlayMode('heatmap')}
-                    >
-                      ヒートマップ
-                    </button>
-                    <button
-                      className={overlayMode === 'respawn' ? 'primary-button small' : 'secondary-button small'}
-                      onClick={() => setOverlayMode('respawn')}
-                    >
-                      リスポーン
-                    </button>
-                    <button
-                      className={overlayMode === 'death' ? 'primary-button small' : 'secondary-button small'}
-                      onClick={() => setOverlayMode('death')}
-                    >
-                      死亡位置
-                    </button>
                     <button
                       className={trailEnabled ? 'primary-button small' : 'secondary-button small'}
                       onClick={() => setTrailEnabled((prev) => !prev)}
@@ -3585,22 +3830,16 @@ function App() {
                     <span className="pill">ズーム {zoom.toFixed(2)}x</span>
                     <span className="pill">
                       表示モード:
-                      {overlayMode === 'normal'
-                        ? '通常'
-                        : overlayMode === 'heatmap'
-                          ? 'ヒートマップ'
-                          : overlayMode === 'respawn'
-                            ? 'リスポーン位置'
-                            : '死亡位置'}
+                      {overlayMode === 'normal' ? '通常' : 'イベント'}
                     </span>
                     <span className="pill">
                       {zoom >= zoomSettings.labelThreshold
                         ? 'ラベル表示: 常時'
                         : 'ラベル表示: ホバー時のみ'}
                     </span>
-                    {activeTrackedCharacterName && (
+                    {activeTrackedLabel && (
                       <span className="pill accent">
-                        追跡中: {activeTrackedCharacterName}
+                        追跡中: {activeTrackedLabel}
                       </span>
                     )}
                     {backgroundLoading && (
@@ -3612,137 +3851,149 @@ function App() {
                       </span>
                     )}
                   </div>
+                  <div className="map-mode-switch">
+                    <span className="map-mode-switch-title">表示</span>
+                    <div className="map-mode-switch-grid">
+                      <button
+                        className={
+                          overlayMode === 'normal'
+                            ? 'primary-button small'
+                            : 'secondary-button small'
+                        }
+                        onClick={() => setOverlayMode('normal')}
+                      >
+                        通常
+                      </button>
+                      <button
+                        className={
+                          overlayMode === 'events'
+                            ? 'primary-button small'
+                            : 'secondary-button small'
+                        }
+                        onClick={() => setOverlayMode('events')}
+                      >
+                        イベント
+                      </button>
+                    </div>
+                    <div className="map-mode-filter-group">
+                      {(['respawn', 'death', 'logout'] as const).map((kind) => (
+                        <button
+                          key={kind}
+                          className={
+                            visibleEventKinds[kind]
+                              ? 'primary-button small'
+                              : 'secondary-button small'
+                          }
+                          onClick={() => toggleEventKindVisibility(kind)}
+                        >
+                          {getEventKindLabel(kind)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   {overlayMode === 'normal' &&
                     characterHoverTooltip &&
-                    hoveredCharacterName &&
+                    hoveredCharacterEntries.length > 0 &&
                     characterTooltipStyle && (
-                      <div className="death-hover-tooltip" style={characterTooltipStyle}>
-                        <div className="death-hover-title">{hoveredCharacterName}</div>
-                        <dl className="death-hover-list">
-                          <div>
-                            <dt>状態</dt>
-                            <dd>
-                              {hoveredRenderedCharacter?.sample.offline ? 'オフライン' : 'オンライン'}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>プレイヤー</dt>
-                            <dd>
-                              {readString(hoveredCharacterSnapshotRecord ?? {}, 'playerName') ||
-                                hoveredRenderedCharacter?.character.playerName ||
-                                '-'}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>生存時間(sec)</dt>
-                            <dd>
-                              {formatMetric(
-                                readNumber(hoveredCharacterSnapshotRecord ?? {}, 'survivalTime'),
-                              )}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>ゾンビキル</dt>
-                            <dd>
-                              {formatMetric(
-                                readNumber(hoveredCharacterSnapshotRecord ?? {}, 'zombieKills'),
-                              )}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>徒歩移動</dt>
-                            <dd>
-                              {formatMetric(
-                                readNumber(hoveredCharacterSnapshotRecord ?? {}, 'movementOnFoot'),
-                                1,
-                              )}
-                            </dd>
-                          </div>
-                        </dl>
+                      <div className="death-hover-tooltip event-hover-tooltip" style={characterTooltipStyle}>
+                        <div className="event-hover-entries">
+                          {hoveredCharacterEntries.map((entry) => (
+                            <section className="event-hover-entry" key={entry.charName}>
+                              <div className="death-hover-title">{entry.charName}</div>
+                              <dl className="death-hover-list">
+                                <div>
+                                  <dt>状態</dt>
+                                  <dd>
+                                    {entry.renderedCharacter?.sample.offline
+                                      ? 'オフライン'
+                                      : 'オンライン'}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt>プレイヤー</dt>
+                                  <dd>
+                                    {readString(entry.snapshotRecord ?? {}, 'playerName') ||
+                                      entry.renderedCharacter?.character.playerName ||
+                                      '-'}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt>生存時間(sec)</dt>
+                                  <dd>
+                                    {formatMetric(
+                                      readNumber(entry.snapshotRecord ?? {}, 'survivalTime'),
+                                    )}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt>ゾンビキル</dt>
+                                  <dd>
+                                    {formatMetric(
+                                      readNumber(entry.snapshotRecord ?? {}, 'zombieKills'),
+                                    )}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt>徒歩移動</dt>
+                                  <dd>
+                                    {formatMetric(
+                                      readNumber(entry.snapshotRecord ?? {}, 'movementOnFoot'),
+                                      1,
+                                    )}
+                                  </dd>
+                                </div>
+                              </dl>
+                            </section>
+                          ))}
+                        </div>
                       </div>
                     )}
-                  {overlayMode === 'respawn' &&
-                    respawnHoverTooltip &&
-                    hoveredRespawnPoint &&
-                    respawnTooltipStyle && (
-                      <div className="death-hover-tooltip" style={respawnTooltipStyle}>
-                        <div className="death-hover-title">{hoveredRespawnPoint.charName}</div>
-                        <dl className="death-hover-list">
-                          <div>
-                            <dt>種別</dt>
-                            <dd>リスポーン</dd>
-                          </div>
-                          <div>
-                            <dt>リスポーン時刻</dt>
-                            <dd>{formatJst(hoveredRespawnPoint.spawnTime)}</dd>
-                          </div>
-                          <div>
-                            <dt>プレイヤー</dt>
-                            <dd>{hoveredRespawnPoint.playerName || '-'}</dd>
-                          </div>
-                          <div>
-                            <dt>生存時間(sec)</dt>
-                            <dd>
-                              {formatMetric(
-                                readNumber(hoveredRespawnSnapshotRecord ?? {}, 'survivalTime'),
-                              )}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>ゾンビキル</dt>
-                            <dd>
-                              {formatMetric(
-                                readNumber(hoveredRespawnSnapshotRecord ?? {}, 'zombieKills'),
-                              )}
-                            </dd>
-                          </div>
-                        </dl>
-                      </div>
-                    )}
-                  {overlayMode === 'death' &&
-                    deathHoverTooltip &&
-                    hoveredDeathPoint &&
-                    deathTooltipStyle && (
-                      <div className="death-hover-tooltip" style={deathTooltipStyle}>
-                        <div className="death-hover-title">{hoveredDeathPoint.charName}</div>
-                        <dl className="death-hover-list">
-                          <div>
-                            <dt>種別</dt>
-                            <dd>
-                              {hoveredDeathPoint.terminalType === 'death'
-                                ? '死亡'
-                                : 'ログアウト?'}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>
-                              {hoveredDeathPoint.terminalType === 'death'
-                                ? '死亡時刻'
-                                : 'ログアウト?時刻'}
-                            </dt>
-                            <dd>{formatJst(hoveredDeathPoint.terminalTime)}</dd>
-                          </div>
-                          <div>
-                            <dt>プレイヤー</dt>
-                            <dd>{hoveredDeathPoint.playerName || '-'}</dd>
-                          </div>
-                          <div>
-                            <dt>生存時間(sec)</dt>
-                            <dd>
-                              {formatMetric(
-                                readNumber(hoveredDeathSnapshotRecord ?? {}, 'survivalTime'),
-                              )}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>ゾンビキル</dt>
-                            <dd>
-                              {formatMetric(
-                                readNumber(hoveredDeathSnapshotRecord ?? {}, 'zombieKills'),
-                              )}
-                            </dd>
-                          </div>
-                        </dl>
+                  {(overlayMode === 'normal' || overlayMode === 'events') &&
+                    eventHoverTooltip &&
+                    eventTooltipStyle && (
+                      <div className="death-hover-tooltip event-hover-tooltip" style={eventTooltipStyle}>
+                        <div className="event-hover-entries">
+                          {eventHoverTooltip.points.map((point) => {
+                            const snapshotRecord = pickSnapshotRecord(
+                              snapshotIndex.get(point.charName) ?? [],
+                            )
+                            return (
+                              <section className="event-hover-entry" key={point.id}>
+                                <div className="death-hover-title">{point.charName}</div>
+                                <dl className="death-hover-list">
+                                  <div>
+                                    <dt>種別</dt>
+                                    <dd>{getEventKindLabel(point.kind)}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>{getEventTimeLabel(point.kind)}</dt>
+                                    <dd>{formatJst(point.time)}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>プレイヤー</dt>
+                                    <dd>{point.playerName || '-'}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>生存時間(sec)</dt>
+                                    <dd>
+                                      {formatMetric(
+                                        readNumber(snapshotRecord ?? {}, 'survivalTime'),
+                                      )}
+                                    </dd>
+                                  </div>
+                                  <div>
+                                    <dt>ゾンビキル</dt>
+                                    <dd>
+                                      {formatMetric(
+                                        readNumber(snapshotRecord ?? {}, 'zombieKills'),
+                                      )}
+                                    </dd>
+                                  </div>
+                                </dl>
+                              </section>
+                            )
+                          })}
+                        </div>
                       </div>
                     )}
                 </div>
@@ -3758,11 +4009,11 @@ function App() {
                   <div className="timeline-content" aria-hidden={timelineCollapsed}>
                     <div className="timeline-main">
                       <div className="timeline-top">
-                        <p className="timeline-time">{formatJst(currentTime)}</p>
+                        <p className="timeline-time">{timelineStatusLabel}</p>
                         <div className="playback-controls">
                           <button
                             className={isPlaying ? 'primary-button small' : 'secondary-button small'}
-                            onClick={() => setIsPlaying((prev) => !prev)}
+                            onClick={handlePlaybackToggle}
                           >
                             {isPlaying ? '停止' : '再生'}
                           </button>
@@ -3813,8 +4064,13 @@ function App() {
                               オンラインタイム
                             </button>
                             <button
-                              className={seekbarMode === 'tracked' ? 'primary-button small' : 'secondary-button small'}
+                              className={
+                                seekbarMode === 'tracked' && activeTrackedCharacterName != null
+                                  ? 'primary-button small'
+                                  : 'secondary-button small'
+                              }
                               onClick={() => setSeekbarMode('tracked')}
+                              disabled={activeTrackedCharacterName == null}
                             >
                               追跡対象
                             </button>
@@ -3891,7 +4147,14 @@ function App() {
 
                       <label className="slider-label overview-label">
                         全体バー（フォーカス範囲表示）
-                        <div className="overview-track">
+                        <div
+                          className="overview-track"
+                          ref={overviewTrackRef}
+                          onPointerDown={handleOverviewScrubPointerDown}
+                          onPointerMove={handleOverviewScrubPointerMove}
+                          onPointerUp={handleOverviewScrubPointerUp}
+                          onPointerCancel={handleOverviewScrubPointerUp}
+                        >
                           {overviewDayBoundaryPercents.map((percent, index) => (
                             <div
                               className="timeline-day-line"
@@ -3908,26 +4171,24 @@ function App() {
                                 0.5,
                               )}%`,
                             }}
+                            onPointerDown={handleOverviewWindowPointerDown}
+                            onPointerMove={handleOverviewWindowPointerMove}
+                            onPointerUp={handleOverviewWindowPointerUp}
+                            onPointerCancel={handleOverviewWindowPointerUp}
+                            onLostPointerCapture={handleOverviewWindowPointerUp}
                           />
-                          <div
-                            className="overview-playhead"
-                            style={{ left: `${currentTimePercent}%` }}
-                          />
+                          {overlayMode === 'normal' && (
+                            <div
+                              className="overview-playhead"
+                              style={{ left: `${currentTimePercent}%` }}
+                              onPointerDown={handleOverviewScrubPointerDown}
+                              onPointerMove={handleOverviewScrubPointerMove}
+                              onPointerUp={handleOverviewScrubPointerUp}
+                              onPointerCancel={handleOverviewScrubPointerUp}
+                              onLostPointerCapture={handleOverviewScrubPointerUp}
+                            />
+                          )}
                         </div>
-                        <input
-                          className="overview-slider"
-                          type="range"
-                          min={0}
-                          max={timelineDuration}
-                          step={1}
-                          value={Math.round(currentTimeVirtual)}
-                          onPointerDown={stopPlaybackForManualControl}
-                          onChange={(event) =>
-                            setCurrentTime(
-                              mapVirtualToRealTime(Number(event.target.value), timelineSegments),
-                            )
-                          }
-                        />
                       </label>
                     </div>
                   </div>
@@ -4009,12 +4270,13 @@ function App() {
                     ×
                   </button>
                 </div>
-                <p>
-                  マウスホイール: スムーズズーム / ドラッグ: パン / WASD:
-                  画面幅1/100を基準に移動（長押し加速）
-                  <br />
-                  WASD・ドラッグ操作で追跡モードは解除されます。
-                </p>
+                <ul className="tips-list">
+                  <li>地図: マウスホイールでズーム / ドラッグ・WASDで移動</li>
+                  <li>追跡: 一覧・アイコン・ネームタグをクリック</li>
+                  <li>表示: 通常 / イベントを切替</li>
+                  <li>下部バー: 全体バーで時刻移動 / フォーカスバーで詳細移動</li>
+                  <li>フォーカスバー上のホイールで表示幅を変更</li>
+                </ul>
               </section>
             )}
 
@@ -4031,5 +4293,3 @@ function App() {
 }
 
 export default App
-
-

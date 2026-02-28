@@ -199,7 +199,6 @@ type HoveredCharacterEntry = {
   snapshotRecord: SnapshotRecord | null
 }
 
-const INTRO_HASH = '#/'
 const MAP_HASH = '#/map'
 const TRACKS_URL = `${import.meta.env.BASE_URL}data/tracks.json`
 const SNAPSHOT_URL = `${import.meta.env.BASE_URL}data/snapshot.json`
@@ -209,7 +208,7 @@ const PLAYBACK_SPEEDS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2024] as c
 const WINDOW_PRESET_HOURS = [1, 2, 4, 6, 12, 24] as const
 const TRAIL_WINDOW_SEC = 30 * 60
 const MIN_WINDOW_SEC = 60 * 60
-const MAX_ZOOM = 32
+const MAX_ZOOM = 64
 const HOVER_RADIUS_PX = 12
 const DEATH_HIGHLIGHT_SEC = 12 * 60 * 60
 const EVENT_MARKER_DISPLAY_SEC = 2 * 60 * 60
@@ -2651,14 +2650,6 @@ function App() {
     setViewMode('map')
   }
 
-  const backToIntro = () => {
-    if (window.location.hash !== INTRO_HASH) {
-      window.location.hash = '/'
-      return
-    }
-    setViewMode('intro')
-  }
-
   const stopPlaybackForManualControl = () => {
     setIsPlaying(false)
   }
@@ -3804,9 +3795,6 @@ function App() {
                     >
                       全時間表示: {allTimeTrail ? 'ON' : 'OFF'}
                     </button>
-                    <button className="secondary-button small" onClick={backToIntro}>
-                      戻る
-                    </button>
                     {!showTips && (
                       <button
                         className="secondary-button small"
@@ -4268,11 +4256,12 @@ function App() {
                 <div className="panel-title-row">
                   <h2>操作メモ</h2>
                   <button
-                    className="secondary-button small"
+                    className="tips-close-button"
                     onClick={() => setShowTips(false)}
                     aria-label="操作メモを閉じる"
                   >
-                    ×
+                    <span aria-hidden="true">×</span>
+                    <span>閉じる</span>
                   </button>
                 </div>
                 <ul className="tips-list">

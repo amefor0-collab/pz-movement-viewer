@@ -320,6 +320,38 @@
   line-height: 1.45;
 }
 
+.tips-close-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  min-height: 1.9rem;
+  padding: 0.26rem 0.58rem;
+  border: 1px solid rgba(196, 73, 73, 0.92);
+  border-radius: 999px;
+  background: rgba(255, 239, 239, 0.98);
+  color: #8f2323;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(143, 35, 35, 0.12);
+}
+
+.tips-close-button span[aria-hidden='true'] {
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.tips-close-button:hover {
+  background: rgba(255, 228, 228, 0.98);
+  border-color: rgba(175, 41, 41, 0.95);
+}
+
+.tips-close-button:focus-visible {
+  outline: 2px solid rgba(175, 41, 41, 0.32);
+  outline-offset: 2px;
+}
+
 .status-window {
   position: absolute;
   left: 0.55rem;

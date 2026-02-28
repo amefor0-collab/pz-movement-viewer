@@ -3469,6 +3469,11 @@ function App() {
             <br />
             大きなデータを扱う前のプレロード画面です。
           </p>
+          <ul className="intro-notes">
+            <li>大量の通信を行います</li>
+            <li>Chrome 環境を推奨します</li>
+            <li>フルスクリーン表示を推奨します</li>
+          </ul>
           <button className="primary-button" onClick={startMap}>
             マップ画面を開く
           </button>

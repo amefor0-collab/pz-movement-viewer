@@ -40,6 +40,18 @@
   color: #36486a;
 }
 
+.intro-notes {
+  margin: 1rem 0 0;
+  padding-left: 1.1rem;
+  color: #314461;
+  display: grid;
+  gap: 0.32rem;
+}
+
+.intro-notes li {
+  line-height: 1.5;
+}
+
 .map-screen {
   width: 100vw;
   height: 100vh;

@@ -124,9 +124,11 @@ type MapViewportRect = {
   sourceBottom: number
 }
 
-type ViewMode = 'intro' | 'map'
+type ViewMode = 'intro' | 'map' | 'ranking'
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 type SeekbarMode = 'full' | 'online' | 'tracked'
+type RankingMode = 'character' | 'player'
+type ListSortMode = 'online' | 'name'
 
 type PeriodRange = {
   start: number
@@ -200,19 +202,20 @@ type HoveredCharacterEntry = {
 }
 
 const MAP_HASH = '#/map'
+const RANKING_HASH = '#/ranking'
 const TRACKS_URL = `${import.meta.env.BASE_URL}data/tracks.json`
 const SNAPSHOT_URL = `${import.meta.env.BASE_URL}data/snapshot.json`
 const MAP_MANIFEST_URL = `${import.meta.env.BASE_URL}data/map/manifest.json`
 const MAP_ASSET_BASE_URL = `${import.meta.env.BASE_URL}data/map/`
-const PLAYBACK_SPEEDS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2024] as const
+const PLAYBACK_SPEEDS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192] as const
 const WINDOW_PRESET_HOURS = [1, 2, 4, 6, 12, 24] as const
 const TRAIL_WINDOW_SEC = 30 * 60
 const MIN_WINDOW_SEC = 60 * 60
 const MAX_ZOOM = 64
 const HOVER_RADIUS_PX = 12
-const DEATH_HIGHLIGHT_SEC = 12 * 60 * 60
-const EVENT_MARKER_DISPLAY_SEC = 2 * 60 * 60
-const EVENT_MARKER_FADE_SEC = 15 * 60
+const TRACKING_OUTLINE_COLOR = '#4a87f5'
+const EVENT_MARKER_DISPLAY_REAL_SEC = 8
+const EVENT_MARKER_FADE_REAL_SEC = 2
 const OFFLINE_THRESHOLD_SEC = 2 * 60 * 60
 const TRACKED_MODE_PADDING_SEC = 5
 const FIXED_PERIOD_START_SEC = Date.parse('2026-02-01T21:00:00+09:00') / 1000
@@ -226,6 +229,28 @@ const FALLBACK_BOUNDS: Bounds = {
   worldMinY: 900,
   mapScale: 1.88,
 }
+
+const CHARACTER_RANKING_CATEGORIES = [
+  { id: 'survivor', title: '\u751f\u5b58\u8005', description: '\u30ad\u30e3\u30e9\u30af\u30bf\u30fc\u6700\u9577\u751f\u5b58\u6642\u9593' },
+  { id: 'reaper-possessed', title: '\u6b7b\u795e\uff1a\u61d1\u4f9d', description: '\u30be\u30f3\u30d3\u8a0e\u4f10\u6570\uff08\u6700\u591a\uff09' },
+  { id: 'pacifist', title: '\u5e73\u548c\u4e3b\u7fa9\u8005', description: '\u30be\u30f3\u30d3\u8a0e\u4f10\u6570\uff08\u6700\u5c0f\uff09' },
+  { id: 'chef', title: '\u6599\u7406\u9577', description: '\u4ed6\u8005\u306b\u632f\u308b\u821e\u3063\u305f\u6599\u7406\u306e\u6570' },
+  { id: 'wrecker', title: '\u5ec3\u8eca\u5c4b', description: '\u8eca\u3067\u4e8b\u6545\u3092\u8d77\u3053\u3057\u305f\u56de\u6570' },
+  { id: 'farmer', title: '\u8fb2\u5834\u4e3b', description: '\u8fb2\u696d\u884c\u52d5\u306e\u7d2f\u7a4d\u56de\u6570' },
+  { id: 'builder', title: '\u5efa\u7bc9\u5bb6', description: '\u5efa\u7bc9\u884c\u52d5\u306e\u7d2f\u7a4d\u56de\u6570' },
+  { id: 'woodcutter', title: '\u958b\u62d3\u8005', description: '\u4f10\u63a1\u56de\u6570' },
+  { id: 'angler', title: '\u91e3\u9053\u697d', description: '\u91e3\u308a\u6210\u529f\u56de\u6570' },
+  { id: 'trapper', title: '\u7f60\u8077\u4eba', description: '\u7f60\u8a2d\u7f6e\u56de\u6570' },
+  { id: 'mechanic', title: '\u6574\u5099\u9577', description: '\u8eca\u4e21\u4fee\u7406\u56de\u6570' },
+  { id: 'social', title: '\u30d1\u30ea\u30d4 / \u5b64\u9ad8', description: '\u8fd1\u63a5\u884c\u52d5\u6642\u9593\uff08Social / Loner\uff09' },
+] as const
+
+const PLAYER_RANKING_CATEGORIES = [
+  { id: 'mainstay', title: '\u5927\u9ed2\u67f1', description: '\u7d2f\u8a08\u30aa\u30f3\u30e9\u30a4\u30f3\u6642\u9593' },
+  { id: 'explorer', title: '\u63a2\u7d22\u8005', description: '\u89e3\u653e\u6e08\u307f\u30de\u30c3\u30d7\u30b0\u30ea\u30c3\u30c9\u6570' },
+  { id: 'reaper-doted', title: '\u6b7b\u795e\uff1a\u6eba\u611b', description: '\u7d2f\u8a08\u6b7b\u4ea1\u56de\u6570' },
+  { id: 'best-partner', title: '\u30d9\u30b9\u30c8\u30d1\u30fc\u30c8\u30ca\u30fc', description: '\u7279\u5b9a\u30d7\u30ec\u30a4\u30e4\u30fc\u3068\u306e\u7d2f\u7a4d\u5171\u540c\u884c\u52d5\u6642\u9593' },
+] as const
 
 const jstDateTimeFormatter = new Intl.DateTimeFormat('ja-JP', {
   timeZone: 'Asia/Tokyo',
@@ -363,21 +388,35 @@ function drawEventMarker(
   context.restore()
 }
 
+function getEventMarkerDisplayWindowSec(playbackSpeed: number) {
+  return Math.max(1, playbackSpeed) * EVENT_MARKER_DISPLAY_REAL_SEC
+}
+
+function getEventMarkerFadeWindowSec(playbackSpeed: number) {
+  return Math.max(1, playbackSpeed) * EVENT_MARKER_FADE_REAL_SEC
+}
+
 function getEventMarkerAlpha(
   point: EventPoint,
   overlayMode: OverlayMode,
   currentTime: number,
   visibleRange: { start: number; end: number },
+  playbackSpeed: number,
 ) {
   if (overlayMode === 'normal') {
-    const visibleUntil = point.time + EVENT_MARKER_DISPLAY_SEC
+    const displayWindowSec = getEventMarkerDisplayWindowSec(playbackSpeed)
+    const fadeWindowSec = Math.min(
+      displayWindowSec,
+      getEventMarkerFadeWindowSec(playbackSpeed),
+    )
+    const visibleUntil = point.time + displayWindowSec
     if (currentTime >= visibleUntil) {
       return 0
     }
-    if (currentTime <= visibleUntil - EVENT_MARKER_FADE_SEC) {
+    if (currentTime <= visibleUntil - fadeWindowSec) {
       return 1
     }
-    return clamp((visibleUntil - currentTime) / EVENT_MARKER_FADE_SEC, 0, 1)
+    return clamp((visibleUntil - currentTime) / fadeWindowSec, 0, 1)
   }
 
   if (overlayMode === 'events') {
@@ -1116,25 +1155,29 @@ function drawLabel(
   top: number,
   alpha: number,
   accent: string,
+  tracked: boolean,
 ) {
   const safeAlpha = clamp(alpha, 0, 1)
   const labelHeight = 16
   const paddingX = 6
+  const borderColor = tracked ? TRACKING_OUTLINE_COLOR : accent
   context.font = '12px "Segoe UI", "Yu Gothic UI", sans-serif'
   const width = context.measureText(text).width + paddingX * 2
   const labelMidY = clamp(anchorY, top + 1, top + labelHeight - 1)
 
-  context.strokeStyle = rgbaFromHex(accent, 0.68 * safeAlpha)
-  context.lineWidth = 1
+  context.strokeStyle = rgbaFromHex(borderColor, tracked ? 0.92 * safeAlpha : 0.68 * safeAlpha)
+  context.lineWidth = tracked ? 1.6 : 1
   context.beginPath()
   context.moveTo(anchorX, anchorY)
   context.lineTo(left, labelMidY)
   context.stroke()
 
-  context.fillStyle = `rgba(16, 24, 37, ${0.78 * safeAlpha})`
+  context.fillStyle = tracked
+    ? `rgba(13, 24, 42, ${0.88 * safeAlpha})`
+    : `rgba(16, 24, 37, ${0.78 * safeAlpha})`
   context.fillRect(left, top, width, labelHeight)
-  context.strokeStyle = rgbaFromHex(accent, 0.72 * safeAlpha)
-  context.lineWidth = 1
+  context.strokeStyle = rgbaFromHex(borderColor, tracked ? 0.98 * safeAlpha : 0.72 * safeAlpha)
+  context.lineWidth = tracked ? 1.6 : 1
   context.strokeRect(left, top, width, labelHeight)
   context.fillStyle = `rgba(255, 255, 255, ${0.98 * safeAlpha})`
   context.fillText(text, left + paddingX, top + 12)
@@ -1208,7 +1251,7 @@ function formatMetric(value: number | null, fractionDigits = 0) {
 
 function getEventKindLabel(kind: EventKind) {
   if (kind === 'respawn') {
-    return 'リスポーン'
+    return 'スポーン'
   }
   if (kind === 'death') {
     return '死亡位置'
@@ -1218,7 +1261,7 @@ function getEventKindLabel(kind: EventKind) {
 
 function getEventTimeLabel(kind: EventKind) {
   if (kind === 'respawn') {
-    return 'リスポーン時刻'
+    return 'スポーン時刻'
   }
   if (kind === 'death') {
     return '死亡時刻'
@@ -1319,11 +1362,48 @@ function getNearestOnlineTimeForCharacters(
   return best
 }
 
+function getLatestObservedTimeForCharacter(
+  character: CharacterTrack,
+  currentTime: number,
+) {
+  if (currentTime < character.life.start) {
+    return Number.NEGATIVE_INFINITY
+  }
+
+  const upperTime = Math.min(currentTime, character.life.end)
+  const index = upperBound(character.track.t, upperTime) - 1
+  if (index < 0) {
+    return Number.NEGATIVE_INFINITY
+  }
+
+  return character.track.t[index] ?? Number.NEGATIVE_INFINITY
+}
+
+function isEventVisibleOnCurrentScreen(
+  eventTime: number,
+  overlayMode: OverlayMode,
+  currentTime: number,
+  visibleRange: { start: number; end: number },
+  playbackSpeed: number,
+) {
+  if (overlayMode === 'events') {
+    return eventTime >= visibleRange.start && eventTime <= visibleRange.end
+  }
+  if (overlayMode === 'normal') {
+    const displayWindowSec = getEventMarkerDisplayWindowSec(playbackSpeed)
+    return eventTime <= currentTime && currentTime <= eventTime + displayWindowSec
+  }
+  return false
+}
+
 function getCharacterListState(
   character: CharacterTrack,
   currentTime: number,
   terminalType: CharacterTerminalType,
   terminalTime: number,
+  overlayMode: OverlayMode,
+  visibleRange: { start: number; end: number },
+  playbackSpeed: number,
 ): 'online' | 'dead' | 'inactive' {
   const sample = getPointAtTime(character, currentTime)
   const isOnline =
@@ -1333,8 +1413,13 @@ function getCharacterListState(
     !sample.offline
   const isDeadRecent =
     terminalType === 'death' &&
-    currentTime >= terminalTime &&
-    currentTime <= terminalTime + DEATH_HIGHLIGHT_SEC
+    isEventVisibleOnCurrentScreen(
+      terminalTime,
+      overlayMode,
+      currentTime,
+      visibleRange,
+      playbackSpeed,
+    )
 
   if (isOnline) {
     return 'online'
@@ -1346,7 +1431,13 @@ function getCharacterListState(
 }
 
 function resolveViewModeFromHash(): ViewMode {
-  return window.location.hash === MAP_HASH ? 'map' : 'intro'
+  if (window.location.hash === MAP_HASH) {
+    return 'map'
+  }
+  if (window.location.hash === RANKING_HASH) {
+    return 'ranking'
+  }
+  return 'intro'
 }
 
 function App() {
@@ -1367,6 +1458,8 @@ function App() {
   const [panelCollapsed, setPanelCollapsed] = useState(false)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const [listMode, setListMode] = useState<ListMode>('character')
+  const [rankingMode, setRankingMode] = useState<RankingMode>('character')
+  const [listSortMode, setListSortMode] = useState<ListSortMode>('online')
   const [expandedPlayers, setExpandedPlayers] = useState<Record<string, boolean>>({})
   const [showTips, setShowTips] = useState(true)
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('normal')
@@ -1435,6 +1528,7 @@ function App() {
     currentOffset: number
   } | null>(null)
   const lastNonFullWindowWidthRef = useRef(24 * 60 * 60)
+  const previousOverlayModeRef = useRef<OverlayMode>('normal')
   const pressedKeysRef = useRef(new Set<string>())
   const keyHoldStartRef = useRef<number | null>(null)
   const keysHandledRef = useRef(false)
@@ -1531,6 +1625,24 @@ function App() {
     timelineSegments[timelineSegments.length - 1]?.virtualEnd ?? periodDuration,
   )
   const minWindowSec = Math.min(MIN_WINDOW_SEC, timelineDuration)
+  const overlayWindowRange = useMemo(() => {
+    const width = clamp(windowWidthSec, minWindowSec, timelineDuration)
+    const maxStart = Math.max(0, timelineDuration - width)
+    const startVirtual = width >= timelineDuration ? 0 : clamp(focusWindowStart, 0, maxStart)
+    const endVirtual = startVirtual + width
+    const start = mapVirtualToRealTime(startVirtual, timelineSegments)
+    const end = mapVirtualToRealTime(endVirtual, timelineSegments)
+    return {
+      start: Math.min(start, end),
+      end: Math.max(start, end),
+    }
+  }, [
+    focusWindowStart,
+    minWindowSec,
+    timelineDuration,
+    timelineSegments,
+    windowWidthSec,
+  ])
 
   useEffect(() => {
     const onHashChange = () => {
@@ -2139,7 +2251,9 @@ function App() {
 
   const panelCharacters = useMemo(() => {
     const keyword = searchTerm.trim().toLocaleLowerCase('ja-JP')
-    return allCharacters
+    const currentTrackedCharacterName =
+      selectTrackingCharacter(trackedPlayerCharacters, currentTime)?.charName ?? null
+    const rows = allCharacters
       .filter((character) =>
         keyword
           ? character.charName.toLocaleLowerCase('ja-JP').includes(keyword)
@@ -2152,27 +2266,60 @@ function App() {
           currentTime,
           terminalInfo?.terminalType ?? 'logout',
           terminalInfo?.terminalTime ?? character.life.end,
+          overlayMode,
+          overlayWindowRange,
+          playbackSpeed,
         )
         return {
           character,
           state,
+          active: currentTrackedCharacterName === character.charName,
+          recentOnlineTime: getLatestObservedTimeForCharacter(character, currentTime),
           visible: visibility[character.charName] !== false,
         }
       })
-      .sort((a, b) => {
-        const rank = (state: 'online' | 'dead' | 'inactive') =>
-          state === 'online' ? 0 : state === 'dead' ? 1 : 2
-        const rankDiff = rank(a.state) - rank(b.state)
-        if (rankDiff !== 0) {
-          return rankDiff
+    if (listSortMode === 'name') {
+      return rows.sort((a, b) =>
+        a.character.charName.localeCompare(b.character.charName, 'ja'),
+      )
+    }
+    return rows.sort((a, b) => {
+      if (a.active !== b.active) {
+        return a.active ? -1 : 1
+      }
+      if (a.state !== b.state) {
+        if (a.state === 'dead') {
+          return -1
         }
-        return a.character.charName.localeCompare(b.character.charName, 'ja')
-      })
-  }, [allCharacters, characterTerminalInfoMap, currentTime, searchTerm, visibility])
+        if (b.state === 'dead') {
+          return 1
+        }
+      }
+      if (a.recentOnlineTime !== b.recentOnlineTime) {
+        return a.recentOnlineTime > b.recentOnlineTime ? -1 : 1
+      }
+      return a.character.charName.localeCompare(b.character.charName, 'ja')
+    })
+  }, [
+    allCharacters,
+    characterTerminalInfoMap,
+    currentTime,
+    listSortMode,
+    overlayMode,
+    overlayWindowRange.end,
+    overlayWindowRange.start,
+    playbackSpeed,
+    searchTerm,
+    trackedPlayerCharacters,
+    visibility,
+  ])
 
   const panelPlayers = useMemo(() => {
     const keyword = searchTerm.trim().toLocaleLowerCase('ja-JP')
     const grouped = new Map<string, CharacterTrack[]>()
+    const trackedCharacterNames = new Set(
+      trackedPlayerCharacters.map((character) => character.charName),
+    )
     for (const character of allCharacters) {
       const playerName = normalizePlayerName(character.playerName)
       const list = grouped.get(playerName)
@@ -2191,6 +2338,8 @@ function App() {
       representative: CharacterTrack | null
       currentCharacterName: string
       active: boolean
+      recentOnlineTime: number
+      respawnVisible: boolean
       visible: boolean
       totalCount: number
     }> = []
@@ -2215,6 +2364,9 @@ function App() {
           currentTime,
           characterTerminalInfoMap.get(character.charName)?.terminalType ?? 'logout',
           characterTerminalInfoMap.get(character.charName)?.terminalTime ?? character.life.end,
+          overlayMode,
+          overlayWindowRange,
+          playbackSpeed,
         ),
       )
       const hasOnline = states.includes('online')
@@ -2225,9 +2377,36 @@ function App() {
           ? 'dead'
           : 'inactive'
       const representative = selectTrackingCharacter(playerCharacters, currentTime)
-      const active =
-        trackedCharacterName != null &&
-        playerCharacters.some((character) => character.charName === trackedCharacterName)
+      const active = playerCharacters.some((character) =>
+        trackedCharacterNames.has(character.charName),
+      )
+      const recentOnlineTime = playerCharacters.reduce((latest, character) => {
+        const observedTime = getLatestObservedTimeForCharacter(character, currentTime)
+        return observedTime > latest ? observedTime : latest
+      }, Number.NEGATIVE_INFINITY)
+      const respawnVisible = playerCharacters.some((character) => {
+        const spawnTime = character.track.t[0] ?? character.life.start
+        const hasPreviousDeath = playerCharacters.some((other) => {
+          if (other.charName === character.charName) {
+            return false
+          }
+          const otherTerminalInfo = characterTerminalInfoMap.get(other.charName)
+          return (
+            otherTerminalInfo?.terminalType === 'death' &&
+            otherTerminalInfo.terminalTime < spawnTime
+          )
+        })
+        return (
+          hasPreviousDeath &&
+          isEventVisibleOnCurrentScreen(
+            spawnTime,
+            overlayMode,
+            currentTime,
+            overlayWindowRange,
+            playbackSpeed,
+          )
+        )
+      })
 
       rows.push({
         playerName,
@@ -2237,6 +2416,8 @@ function App() {
         representative,
         currentCharacterName: representative?.charName ?? '-',
         active,
+        recentOnlineTime,
+        respawnVisible,
         visible: filteredCharacters.some(
           (character) => visibility[character.charName] !== false,
         ),
@@ -2244,12 +2425,24 @@ function App() {
       })
     }
 
+    if (listSortMode === 'name') {
+      return rows.sort((a, b) => a.playerName.localeCompare(b.playerName, 'ja'))
+    }
+
     return rows.sort((a, b) => {
-      const rank = (state: 'online' | 'dead' | 'inactive') =>
-        state === 'online' ? 0 : state === 'dead' ? 1 : 2
-      const rankDiff = rank(a.state) - rank(b.state)
-      if (rankDiff !== 0) {
-        return rankDiff
+      if (a.active !== b.active) {
+        return a.active ? -1 : 1
+      }
+      if (a.state !== b.state) {
+        if (a.state === 'dead') {
+          return -1
+        }
+        if (b.state === 'dead') {
+          return 1
+        }
+      }
+      if (a.recentOnlineTime !== b.recentOnlineTime) {
+        return a.recentOnlineTime > b.recentOnlineTime ? -1 : 1
       }
       return a.playerName.localeCompare(b.playerName, 'ja')
     })
@@ -2257,8 +2450,13 @@ function App() {
     allCharacters,
     characterTerminalInfoMap,
     currentTime,
+    listSortMode,
+    overlayMode,
+    overlayWindowRange.end,
+    overlayWindowRange.start,
+    playbackSpeed,
     searchTerm,
-    trackedCharacterName,
+    trackedPlayerCharacters,
     visibility,
   ])
 
@@ -2389,25 +2587,6 @@ function App() {
     return pickSnapshotRecord(records)
   }, [snapshotIndex, statusCharacterName])
 
-  const overlayWindowRange = useMemo(() => {
-    const width = clamp(windowWidthSec, minWindowSec, timelineDuration)
-    const maxStart = Math.max(0, timelineDuration - width)
-    const startVirtual = width >= timelineDuration ? 0 : clamp(focusWindowStart, 0, maxStart)
-    const endVirtual = startVirtual + width
-    const start = mapVirtualToRealTime(startVirtual, timelineSegments)
-    const end = mapVirtualToRealTime(endVirtual, timelineSegments)
-    return {
-      start: Math.min(start, end),
-      end: Math.max(start, end),
-    }
-  }, [
-    focusWindowStart,
-    minWindowSec,
-    timelineDuration,
-    timelineSegments,
-    windowWidthSec,
-  ])
-
   const allEventPoints = useMemo(() => {
     const points: EventPoint[] = []
     for (const character of allCharacters) {
@@ -2459,9 +2638,10 @@ function App() {
       )
     }
     if (overlayMode === 'normal') {
+      const displayWindowSec = getEventMarkerDisplayWindowSec(playbackSpeed)
       return filtered.filter(
         (point) =>
-          point.time <= currentTime && currentTime <= point.time + EVENT_MARKER_DISPLAY_SEC,
+          point.time <= currentTime && currentTime <= point.time + displayWindowSec,
       )
     }
     return []
@@ -2472,6 +2652,7 @@ function App() {
     overlayWindowRange.end,
     overlayWindowRange.start,
     visibility,
+    playbackSpeed,
     visibleEventKinds,
   ])
 
@@ -2562,14 +2743,27 @@ function App() {
   }, [dayBoundaryVirtualTimes, timeWindow.end, timeWindow.start])
 
   useEffect(() => {
-    if (overlayMode === 'normal') {
+    const previousOverlayMode = previousOverlayModeRef.current
+    previousOverlayModeRef.current = overlayMode
+
+    if (overlayMode === 'events' && previousOverlayMode !== 'events') {
+      setIsPlaying(false)
+      setSeekbarMode('full')
+      setWindowWidthSec(timelineDuration)
+      setFocusWindowStart(0)
       return
     }
-    setIsPlaying(false)
-    setSeekbarMode('full')
-    setWindowWidthSec(timelineDuration)
-    setFocusWindowStart(0)
-  }, [overlayMode, timelineDuration])
+
+    if (overlayMode === 'normal' && previousOverlayMode === 'events') {
+      const restoredWidth = clamp(lastNonFullWindowWidthRef.current, minWindowSec, timelineDuration)
+      if (restoredWidth < timelineDuration) {
+        const currentVirtual = mapRealToVirtualTime(currentTime, timelineSegments)
+        const maxStart = Math.max(0, timelineDuration - restoredWidth)
+        setWindowWidthSec(restoredWidth)
+        setFocusWindowStart(clamp(currentVirtual - restoredWidth / 2, 0, maxStart))
+      }
+    }
+  }, [currentTime, minWindowSec, overlayMode, timelineDuration, timelineSegments])
   const selectedTileLevel = useMemo(() => {
     if (zoom < zoomSettings.tileSwitchZoom) {
       return null
@@ -2648,6 +2842,14 @@ function App() {
       return
     }
     setViewMode('map')
+  }
+
+  const startRanking = () => {
+    if (window.location.hash !== RANKING_HASH) {
+      window.location.hash = '/ranking'
+      return
+    }
+    setViewMode('ranking')
   }
 
   const stopPlaybackForManualControl = () => {
@@ -3380,6 +3582,7 @@ function App() {
           overlayMode,
           currentTime,
           overlayWindowRange,
+          playbackSpeed,
         )
         drawEventMarker(
           context,
@@ -3403,10 +3606,16 @@ function App() {
         context.fill()
 
         if (activeTrackedCharacterName === character.charName) {
-          context.strokeStyle = 'rgba(24, 36, 56, 0.85)'
-          context.lineWidth = 1.5
+          context.strokeStyle = `rgba(255, 255, 255, ${0.94 * alpha})`
+          context.lineWidth = 3.2
           context.beginPath()
-          context.arc(screenX, screenY, 6.8, 0, Math.PI * 2)
+          context.arc(screenX, screenY, 6.9, 0, Math.PI * 2)
+          context.stroke()
+
+          context.strokeStyle = rgbaFromHex(TRACKING_OUTLINE_COLOR, alpha)
+          context.lineWidth = 2
+          context.beginPath()
+          context.arc(screenX, screenY, 6.9, 0, Math.PI * 2)
           context.stroke()
         }
       }
@@ -3420,6 +3629,7 @@ function App() {
           label.top,
           label.alpha,
           iconColor,
+          label.charName === activeTrackedCharacterName,
         )
       }
     }
@@ -3465,10 +3675,100 @@ function App() {
             <li>Chrome 環境を推奨します</li>
             <li>フルスクリーン表示を推奨します</li>
           </ul>
-          <button className="primary-button" onClick={startMap}>
-            マップ画面を開く
-          </button>
+          <div className="intro-actions">
+            <button className="primary-button" onClick={startMap}>
+              {'\u30de\u30c3\u30d7\u753b\u9762\u3092\u958b\u304f'}
+            </button>
+            <button className="secondary-button" onClick={startRanking}>
+              {'\u30e9\u30f3\u30ad\u30f3\u30b0\u30da\u30fc\u30b8\u3092\u958b\u304f'}
+            </button>
+          </div>
         </div>
+      </div>
+    )
+  }
+
+  if (viewMode === 'ranking') {
+    const activeCategories =
+      rankingMode === 'character' ? CHARACTER_RANKING_CATEGORIES : PLAYER_RANKING_CATEGORIES
+
+    return (
+      <div className="ranking-screen">
+        <main className="ranking-shell">
+          <section className="ranking-hero">
+            <p className="intro-kicker">{'\u0050\u005A \u884c\u52d5\u5c65\u6b74\u30d3\u30e5\u30fc\u30a2'}</p>
+            <h1>{'\u30e9\u30f3\u30ad\u30f3\u30b0\u30da\u30fc\u30b8'}</h1>
+            <p>
+              {'\u65e7\u7d71\u8a08\u4ed5\u69d8.txt \u306e\u9805\u76ee\u3092\u5143\u306b\u3057\u305f\u30da\u30fc\u30b8\u67a0\u3067\u3059\u3002'}
+              <br />
+              {'\u4eca\u56de\u306f\u30da\u30fc\u30b8\u69cb\u6210\u3068\u8868\u793a\u5207\u66ff\u306e\u307f\u5b9f\u88c5\u3057\u3001\u30e9\u30f3\u30ad\u30f3\u30b0\u306e\u5b9f\u30c7\u30fc\u30bf\u63a5\u7d9a\u306f\u5f8c\u7d9a\u5bfe\u5fdc\u306b\u3057\u307e\u3059\u3002'}
+            </p>
+          </section>
+
+          <section className="ranking-panel">
+            <div className="ranking-switch" role="tablist" aria-label={'\u30e9\u30f3\u30ad\u30f3\u30b0\u8868\u793a\u5207\u66ff'}>
+              <button
+                className={rankingMode === 'character' ? 'primary-button' : 'secondary-button'}
+                onClick={() => setRankingMode('character')}
+                role="tab"
+                aria-selected={rankingMode === 'character'}
+              >
+                {'\u30ad\u30e3\u30e9\u30af\u30bf\u30fc\u7d71\u8a08'}
+              </button>
+              <button
+                className={rankingMode === 'player' ? 'primary-button' : 'secondary-button'}
+                onClick={() => setRankingMode('player')}
+                role="tab"
+                aria-selected={rankingMode === 'player'}
+              >
+                {'\u30d7\u30ec\u30a4\u30e4\u30fc\u7d71\u8a08'}
+              </button>
+            </div>
+
+            <div className="ranking-meta-row">
+              <span className="pill">{rankingMode === 'character' ? '\u30ad\u30e3\u30e9\u30af\u30bf\u30fc\u5358\u4f4d' : '\u30d7\u30ec\u30a4\u30e4\u30fc\u5358\u4f4d'}</span>
+              <span className="pill warning">{'\u5b9f\u30c7\u30fc\u30bf\u63a5\u7d9a\u306f\u672a\u5b9f\u88c5'}</span>
+            </div>
+
+            {rankingMode === 'player' && (
+              <section className="ranking-collapsed-card" aria-label={'\u30ad\u30e3\u30e9\u30af\u30bf\u30fc\u7d71\u8a08\u306f\u53ce\u7d0d\u4e2d'}>
+                <div className="ranking-collapsed-head">
+                  <span className="ranking-collapsed-icon">{'\u25b6'}</span>
+                  <div>
+                    <strong>{'\u30ad\u30e3\u30e9\u30af\u30bf\u30fc\u7d71\u8a08'}</strong>
+                    <p>{'\u30d7\u30ec\u30a4\u30e4\u30fc\u7d71\u8a08\u8868\u793a\u4e2d\u306f\u53ce\u7d0d\u72b6\u614b\u3067\u3059\u3002\u4eca\u5f8c\u306f\u30d7\u30ec\u30a4\u30e4\u30fc\u5358\u4f4d\u306e\u4e2d\u306b\u5c55\u958b\u4e88\u5b9a\u3067\u3059\u3002'}</p>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            <section className="ranking-grid">
+              {activeCategories.map((category) => (
+                <article key={category.id} className="ranking-category-card">
+                  <div className="ranking-category-head">
+                    <h2>{category.title}</h2>
+                    <span className="ranking-category-badge">{'\u6e96\u5099\u4e2d'}</span>
+                  </div>
+                  <p>{category.description}</p>
+                  <div className="ranking-placeholder-list" aria-hidden="true">
+                    <div>
+                      <span>{'1\u4f4d'}</span>
+                      <strong>--</strong>
+                    </div>
+                    <div>
+                      <span>{'2\u4f4d'}</span>
+                      <strong>--</strong>
+                    </div>
+                    <div>
+                      <span>{'3\u4f4d'}</span>
+                      <strong>--</strong>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </section>
+          </section>
+        </main>
       </div>
     )
   }
@@ -3541,7 +3841,26 @@ function App() {
                   </div>
 
                   <div className="list-header-row">
-                    <div className="list-header-spacer" />
+                    <div className="list-header-spacer">
+                      <div className="list-sort-switch" role="group" aria-label="一覧ソート切替">
+                        <button
+                          className={
+                            listSortMode === 'online' ? 'primary-button small' : 'secondary-button small'
+                          }
+                          onClick={() => setListSortMode('online')}
+                        >
+                          最近オンライン順
+                        </button>
+                        <button
+                          className={
+                            listSortMode === 'name' ? 'primary-button small' : 'secondary-button small'
+                          }
+                          onClick={() => setListSortMode('name')}
+                        >
+                          名前順
+                        </button>
+                      </div>
+                    </div>
                     <label className="list-master-visibility">
                       <span className="list-master-visibility-label">全キャラ表示</span>
                       <input
@@ -3563,7 +3882,7 @@ function App() {
                           <button
                             className={`character-line ${row.state} ${
                               selectedCharacterName === row.character.charName ? 'selected' : ''
-                            }`}
+                            } ${row.active ? 'tracked' : ''}`}
                             onClick={() => {
                               setSelectedCharacterName(row.character.charName)
                               beginTrackingCharacter(row.character.charName)
@@ -3619,9 +3938,7 @@ function App() {
                             key={row.playerName}
                           >
                             <div
-                              className={`player-line ${row.state} ${
-                                row.active ? 'selected' : ''
-                              }`}
+                              className={`player-line ${row.state} ${row.active ? 'tracked' : ''}`}
                             >
                               <div className="player-line-leading">
                                 <span className="count-badge">{row.totalCount}</span>
@@ -3675,8 +3992,8 @@ function App() {
                                     <span className="player-current-character">
                                       ({row.currentCharacterName})
                                   </span>
-                                  {row.state === 'dead' && (
-                                    <span className="new-character-tag">NewCheracter!!</span>
+                                  {row.respawnVisible && (
+                                    <span className="new-character-tag">リスポーン</span>
                                   )}
                                 </span>
                               </button>
@@ -3708,6 +4025,9 @@ function App() {
                                     currentTime,
                                     terminalInfo?.terminalType ?? 'logout',
                                     terminalInfo?.terminalTime ?? character.life.end,
+                                    overlayMode,
+                                    overlayWindowRange,
+                                    playbackSpeed,
                                   )
                                   const childVisible =
                                     visibility[character.charName] !== false
@@ -3722,6 +4042,10 @@ function App() {
                                         className={`child-character ${childState} ${
                                           selectedCharacterName === character.charName
                                             ? 'selected'
+                                            : ''
+                                        } ${
+                                          activeTrackedCharacterName === character.charName
+                                            ? 'tracked'
                                             : ''
                                         }`}
                                         onClick={() => {

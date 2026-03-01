@@ -1,6 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildRankingData, type SnapshotData, type TracksData } from '../src/features/ranking/ranking.js'
+import {
+  buildPlayerPartnerLists,
+  buildRankingData,
+  type SnapshotData,
+  type TracksData,
+} from '../src/features/ranking/ranking.js'
 import type { CharacterTrack } from '../src/features/domain/characters.js'
 
 function createCharacter(
@@ -111,7 +116,7 @@ test('buildRankingData hides cards with no collected data', () => {
   assert.equal(ranking.playerCards.some((card) => card.id === 'builder'), false)
 })
 
-test('buildRankingData creates survivor and social sections from snapshot metrics', () => {
+test('buildRankingData creates survivor, social, and loner cards from snapshot metrics', () => {
   const snapshotData: SnapshotData = {
     data: {
       c1: {
@@ -136,10 +141,11 @@ test('buildRankingData creates survivor and social sections from snapshot metric
   const ranking = buildRankingData(snapshotData, { characters: {} })
   const survivorCard = ranking.characterCards.find((card) => card.id === 'survivor')
   const socialCard = ranking.characterCards.find((card) => card.id === 'social')
+  const lonerCard = ranking.characterCards.find((card) => card.id === 'loner')
 
   assert.equal(survivorCard?.sections[0]?.entries[0]?.label, 'char-2')
   assert.equal(socialCard?.sections[0]?.entries[0]?.label, 'char-1')
-  assert.equal(socialCard?.sections[1]?.entries[0]?.label, 'char-2')
+  assert.equal(lonerCard?.sections[0]?.entries[0]?.label, 'char-2')
 })
 
 test('buildRankingData keeps all ranking entries for UI-side expansion', () => {
@@ -158,4 +164,78 @@ test('buildRankingData keeps all ranking entries for UI-side expansion', () => {
   assert.equal(survivorCard?.sections[0]?.entries.length, 4)
   assert.equal(survivorCard?.sections[0]?.entries[0]?.label, 'char-4')
   assert.equal(survivorCard?.sections[0]?.entries[3]?.label, 'char-1')
+})
+
+test('buildRankingData keeps player ownership on entries for selected-player display', () => {
+  const snapshotData: SnapshotData = {
+    data: {
+      c1: { name: 'char-1', playerName: 'P1', survivalTime: 1000, zombieKills: 1 },
+      c2: { name: 'char-2', playerName: 'P2', survivalTime: 2000, zombieKills: 2 },
+    },
+  }
+
+  const tracksData: TracksData = {
+    characters: {
+      'char-1': createCharacter('char-1', 'P1', 0, 100, [
+        [0, 0, 0],
+        [100, 1, 1],
+      ]),
+      'char-2': createCharacter('char-2', 'P2', 0, 200, [
+        [0, 0, 0],
+        [200, 2, 2],
+      ]),
+    },
+  }
+
+  const ranking = buildRankingData(snapshotData, tracksData)
+  const characterSurvivor = ranking.characterCards.find((card) => card.id === 'survivor')
+  const playerMainstay = ranking.playerCards.find((card) => card.id === 'mainstay')
+
+  assert.equal(characterSurvivor?.sections[0]?.entries[0]?.playerName, 'P2')
+  assert.equal(characterSurvivor?.sections[0]?.entries[0]?.charName, 'char-2')
+  assert.equal(playerMainstay?.sections[0]?.entries[0]?.playerName, 'P2')
+  assert.equal(playerMainstay?.sections[0]?.entries[0]?.charName, undefined)
+})
+
+test('buildPlayerPartnerLists returns selected player partners in duration order', () => {
+  const snapshotData: SnapshotData = {
+    data: {
+      a1: {
+        name: 'alice-1',
+        playerID: 'p1',
+        playerName: 'Alice',
+        partners: {
+          'p2::bob-1': 120,
+          'p3::carol-1': 360,
+        },
+      },
+      a2: {
+        name: 'alice-2',
+        playerID: 'p1',
+        playerName: 'Alice',
+        partners: {
+          'p2::bob-1': 300,
+        },
+      },
+      b1: {
+        name: 'bob-1',
+        playerID: 'p2',
+        playerName: 'Bob',
+      },
+      c1: {
+        name: 'carol-1',
+        playerID: 'p3',
+        playerName: 'Carol',
+      },
+    },
+  }
+
+  const partnerLists = buildPlayerPartnerLists(snapshotData)
+  const alicePartners = partnerLists.get('Alice')
+
+  assert.equal(alicePartners?.length, 2)
+  assert.equal(alicePartners?.[0]?.partnerName, 'Carol')
+  assert.equal(alicePartners?.[0]?.durationSec, 360)
+  assert.equal(alicePartners?.[1]?.partnerName, 'Bob')
+  assert.equal(alicePartners?.[1]?.durationSec, 300)
 })

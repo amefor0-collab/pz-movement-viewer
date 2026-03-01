@@ -21,6 +21,8 @@ export type RankingEntry = {
   label: string
   subLabel?: string
   valueLabel: string
+  playerName?: string
+  charName?: string
 }
 
 export type RankingSection = {
@@ -42,6 +44,11 @@ export type RankingData = {
   playerCards: RankingCard[]
   totalCharacters: number
   totalPlayers: number
+}
+
+export type PlayerPartnerEntry = {
+  partnerName: string
+  durationSec: number
 }
 
 type CharacterMetric = {
@@ -193,6 +200,74 @@ function resolvePartnerName(
     return byChar
   }
   return partnerCharName?.trim() || partnerPlayerId?.trim() || partnerKey
+}
+
+export function buildPlayerPartnerLists(snapshotData: SnapshotData | null) {
+  const playerIdToName = new Map<string, string>()
+  const charNameToPlayerName = new Map<string, string>()
+  const snapshotRecords = snapshotData?.data ? Object.values(snapshotData.data) : []
+
+  for (const record of snapshotRecords) {
+    const charName = readString(record, 'name')
+    if (!charName) {
+      continue
+    }
+    const playerID = readString(record, 'playerID')
+    const playerName = normalizePlayerName(readString(record, 'playerName'), playerID || charName)
+    if (playerID) {
+      playerIdToName.set(playerID, playerName)
+    }
+    charNameToPlayerName.set(charName, playerName)
+  }
+
+  const partnerMaps = new Map<string, Map<string, number>>()
+
+  for (const record of snapshotRecords) {
+    const charName = readString(record, 'name')
+    if (!charName) {
+      continue
+    }
+
+    const playerID = readString(record, 'playerID')
+    const playerName = normalizePlayerName(readString(record, 'playerName'), playerID || charName)
+    const rawPartners = record.partners
+    if (!rawPartners || typeof rawPartners !== 'object' || Array.isArray(rawPartners)) {
+      continue
+    }
+
+    const partnerMap = partnerMaps.get(playerName) ?? new Map<string, number>()
+    for (const [partnerKey, rawValue] of Object.entries(rawPartners)) {
+      const duration =
+        typeof rawValue === 'number'
+          ? rawValue
+          : typeof rawValue === 'string'
+            ? Number(rawValue)
+            : 0
+      if (!Number.isFinite(duration) || duration <= 0) {
+        continue
+      }
+      const resolvedName = resolvePartnerName(partnerKey, playerIdToName, charNameToPlayerName)
+      if (!resolvedName || resolvedName === playerName) {
+        continue
+      }
+      partnerMap.set(resolvedName, Math.max(partnerMap.get(resolvedName) ?? 0, duration))
+    }
+    partnerMaps.set(playerName, partnerMap)
+  }
+
+  const result = new Map<string, PlayerPartnerEntry[]>()
+  for (const [playerName, partnerMap] of partnerMaps.entries()) {
+    result.set(
+      playerName,
+      [...partnerMap.entries()]
+        .map(([partnerName, durationSec]) => ({ partnerName, durationSec }))
+        .sort(
+          (a, b) =>
+            b.durationSec - a.durationSec || a.partnerName.localeCompare(b.partnerName, 'ja'),
+        ),
+    )
+  }
+  return result
 }
 
 function createEmptyPlayerAggregate(playerName: string, currentCharacterName: string): PlayerAggregate {
@@ -376,41 +451,55 @@ function createSingleCard(
   } satisfies RankingCard
 }
 
-function createSection(
-  id: string,
-  title: string | undefined,
-  entries: RankingEntry[],
-) {
-  if (entries.length === 0) {
-    return null
-  }
+function createCharacterEntry(
+  character: CharacterMetric,
+  valueLabel: string,
+  options?: {
+    id?: string
+    subLabel?: string
+  },
+): RankingEntry {
   return {
-    id,
-    title,
-    entries,
-  } satisfies RankingSection
+    id: options?.id ?? character.charName,
+    label: character.charName,
+    subLabel: options?.subLabel ?? character.playerName,
+    valueLabel,
+    playerName: character.playerName,
+    charName: character.charName,
+  }
+}
+
+function createPlayerEntry(
+  player: PlayerAggregate,
+  valueLabel: string,
+  options?: {
+    id?: string
+    subLabel?: string
+  },
+): RankingEntry {
+  return {
+    id: options?.id ?? player.playerName,
+    label: player.playerName,
+    subLabel: options?.subLabel,
+    valueLabel,
+    playerName: player.playerName,
+  }
 }
 
 function buildCharacterCards(characterMetrics: CharacterMetric[]) {
   const survivors = [...characterMetrics]
     .filter((character) => character.survivalTime > 0)
     .sort((a, b) => b.survivalTime - a.survivalTime || a.charName.localeCompare(b.charName, 'ja'))
-    .map((character) => ({
-      id: character.charName,
-      label: character.charName,
-      subLabel: character.playerName,
-      valueLabel: formatDurationShort(character.survivalTime),
-    }))
+    .map((character) =>
+      createCharacterEntry(character, formatDurationShort(character.survivalTime)),
+    )
 
   const reapers = [...characterMetrics]
     .filter((character) => character.zombieKills > 0)
     .sort((a, b) => b.zombieKills - a.zombieKills || a.charName.localeCompare(b.charName, 'ja'))
-    .map((character) => ({
-      id: character.charName,
-      label: character.charName,
-      subLabel: character.playerName,
-      valueLabel: `${formatCount(character.zombieKills)} キル`,
-    }))
+    .map((character) =>
+      createCharacterEntry(character, `${formatCount(character.zombieKills)} キル`),
+    )
 
   const pacifistPool = characterMetrics.filter((character) => character.survivalTime > 0)
   const pacifistCandidates = pacifistPool.some(
@@ -425,12 +514,11 @@ function buildCharacterCards(characterMetrics: CharacterMetric[]) {
         b.survivalTime - a.survivalTime ||
         a.charName.localeCompare(b.charName, 'ja'),
     )
-    .map((character) => ({
-      id: character.charName,
-      label: character.charName,
-      subLabel: `${character.playerName} / ${formatDurationShort(character.survivalTime)}`,
-      valueLabel: `キル ${formatCount(character.zombieKills)}`,
-    }))
+    .map((character) =>
+      createCharacterEntry(character, `キル ${formatCount(character.zombieKills)}`, {
+        subLabel: `${character.playerName} / ${formatDurationShort(character.survivalTime)}`,
+      }),
+    )
 
   const chefs = [...characterMetrics]
     .filter(
@@ -446,103 +534,66 @@ function buildCharacterCards(characterMetrics: CharacterMetric[]) {
         b.serveWaterIntake - a.serveWaterIntake ||
         a.charName.localeCompare(b.charName, 'ja'),
     )
-    .map((character) => ({
-      id: character.charName,
-      label: character.charName,
-      subLabel: character.playerName,
-      valueLabel:
+    .map((character) =>
+      createCharacterEntry(
+        character,
         character.serveCount > 0
           ? `提供 ${formatCount(character.serveCount)} 回`
           : `提供 ${formatDecimal(character.serveCalories)} kcal`,
-    }))
+      ),
+    )
 
   const wreckers = [...characterMetrics]
     .filter((character) => character.wreckerScore > 0)
     .sort((a, b) => b.wreckerScore - a.wreckerScore || a.charName.localeCompare(b.charName, 'ja'))
-    .map((character) => ({
-      id: character.charName,
-      label: character.charName,
-      subLabel: character.playerName,
-      valueLabel: formatCount(character.wreckerScore),
-    }))
+    .map((character) => createCharacterEntry(character, formatCount(character.wreckerScore)))
 
   const farmers = [...characterMetrics]
     .filter((character) => character.farming > 0)
     .sort((a, b) => b.farming - a.farming || a.charName.localeCompare(b.charName, 'ja'))
-    .map((character) => ({
-      id: character.charName,
-      label: character.charName,
-      subLabel: character.playerName,
-      valueLabel: formatDecimal(character.farming),
-    }))
+    .map((character) => createCharacterEntry(character, formatDecimal(character.farming)))
 
   const builders = [...characterMetrics]
     .filter((character) => character.build > 0)
     .sort((a, b) => b.build - a.build || a.charName.localeCompare(b.charName, 'ja'))
-    .map((character) => ({
-      id: character.charName,
-      label: character.charName,
-      subLabel: character.playerName,
-      valueLabel: formatDecimal(character.build),
-    }))
+    .map((character) => createCharacterEntry(character, formatDecimal(character.build)))
 
   const anglers = [...characterMetrics]
     .filter((character) => character.fishCount > 0)
     .sort((a, b) => b.fishCount - a.fishCount || a.charName.localeCompare(b.charName, 'ja'))
-    .map((character) => ({
-      id: character.charName,
-      label: character.charName,
-      subLabel: `${character.playerName} / 外道 ${formatCount(character.fishTrashCount)}`,
-      valueLabel: `${formatCount(character.fishCount)} 匹`,
-    }))
+    .map((character) =>
+      createCharacterEntry(character, `${formatCount(character.fishCount)} 匹`, {
+        subLabel: `${character.playerName} / 外道 ${formatCount(character.fishTrashCount)}`,
+      }),
+    )
 
   const trappers = [...characterMetrics]
     .filter((character) => character.trapping > 0)
     .sort((a, b) => b.trapping - a.trapping || a.charName.localeCompare(b.charName, 'ja'))
-    .map((character) => ({
-      id: character.charName,
-      label: character.charName,
-      subLabel: character.playerName,
-      valueLabel: formatDecimal(character.trapping),
-    }))
+    .map((character) => createCharacterEntry(character, formatDecimal(character.trapping)))
 
   const mechanics = [...characterMetrics]
     .filter((character) => character.mechanics > 0)
     .sort((a, b) => b.mechanics - a.mechanics || a.charName.localeCompare(b.charName, 'ja'))
-    .map((character) => ({
-      id: character.charName,
-      label: character.charName,
-      subLabel: character.playerName,
-      valueLabel: formatDecimal(character.mechanics),
-    }))
+    .map((character) => createCharacterEntry(character, formatDecimal(character.mechanics)))
 
   const socials = [...characterMetrics]
     .filter((character) => character.socialTime > 0)
     .sort((a, b) => b.socialTime - a.socialTime || a.charName.localeCompare(b.charName, 'ja'))
-    .map((character) => ({
-      id: `social:${character.charName}`,
-      label: character.charName,
-      subLabel: character.playerName,
-      valueLabel: formatDurationShort(character.socialTime),
-    }))
+    .map((character) =>
+      createCharacterEntry(character, formatDurationShort(character.socialTime), {
+        id: `social:${character.charName}`,
+      }),
+    )
 
   const loners = [...characterMetrics]
     .filter((character) => character.lonerTime > 0)
     .sort((a, b) => b.lonerTime - a.lonerTime || a.charName.localeCompare(b.charName, 'ja'))
-    .map((character) => ({
-      id: `loner:${character.charName}`,
-      label: character.charName,
-      subLabel: character.playerName,
-      valueLabel: formatDurationShort(character.lonerTime),
-    }))
-
-  const socialCardSectionCandidates: Array<RankingSection | null> = [
-    createSection('social:section', '社交家', socials),
-    createSection('loner:section', '一匹狼', loners),
-  ]
-  const socialCardSections = socialCardSectionCandidates.filter(
-    (section): section is RankingSection => section != null,
-  )
+    .map((character) =>
+      createCharacterEntry(character, formatDurationShort(character.lonerTime), {
+        id: `loner:${character.charName}`,
+      }),
+    )
 
   const cards = [
     createSingleCard('survivor', '生存者', '最も長く生き残ったキャラクターです。', 'キャラ', survivors),
@@ -555,46 +606,25 @@ function buildCharacterCards(characterMetrics: CharacterMetric[]) {
     createSingleCard('angler', '釣り人', '釣果が多いキャラクターです。', 'キャラ', anglers),
     createSingleCard('trapper', '罠師', '罠設置や回収が多いキャラクターです。', 'キャラ', trappers),
     createSingleCard('mechanic', '整備士', '車両整備の行動量が多いキャラクターです。', 'キャラ', mechanics),
-    socialCardSections.length > 0
-      ? {
-          id: 'social',
-          title: '社交家 / 一匹狼',
-          description: 'socialTime と lonerTime の上位です。',
-          unit: 'キャラ',
-          sections: socialCardSections,
-        }
-      : null,
+    createSingleCard('social', '社交家', 'socialTime が長いキャラクターです。', 'キャラ', socials),
+    createSingleCard('loner', '一匹狼', 'lonerTime が長いキャラクターです。', 'キャラ', loners),
   ]
 
   return cards.filter((card): card is RankingCard => card != null)
 }
 
 function buildPlayerCards(playerAggregates: PlayerAggregate[]) {
-  const survivors = [...playerAggregates]
-    .filter((player) => player.totalSurvivalTime > 0)
-    .sort(
-      (a, b) =>
-        b.totalSurvivalTime - a.totalSurvivalTime ||
-        a.playerName.localeCompare(b.playerName, 'ja'),
-    )
-    .map((player) => ({
-      id: `survivor:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `現在 ${player.currentCharacterName}`,
-      valueLabel: formatDurationShort(player.totalSurvivalTime),
-    }))
-
   const mainstays = [...playerAggregates]
     .filter((player) => player.onlineTimeSec > 0)
     .sort(
       (a, b) => b.onlineTimeSec - a.onlineTimeSec || a.playerName.localeCompare(b.playerName, 'ja'),
     )
-    .map((player) => ({
-      id: `mainstay:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ / 現在 ${player.currentCharacterName}`,
-      valueLabel: formatDurationShort(player.onlineTimeSec),
-    }))
+    .map((player) =>
+      createPlayerEntry(player, formatDurationShort(player.onlineTimeSec), {
+        id: `mainstay:${player.playerName}`,
+        subLabel: `${player.characterNames.length} キャラ / 現在 ${player.currentCharacterName}`,
+      }),
+    )
 
   const reapers = [...playerAggregates]
     .filter((player) => player.totalZombieKills > 0)
@@ -603,12 +633,12 @@ function buildPlayerCards(playerAggregates: PlayerAggregate[]) {
         b.totalZombieKills - a.totalZombieKills ||
         a.playerName.localeCompare(b.playerName, 'ja'),
     )
-    .map((player) => ({
-      id: `reaper:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ`,
-      valueLabel: `${formatCount(player.totalZombieKills)} キル`,
-    }))
+    .map((player) =>
+      createPlayerEntry(player, `${formatCount(player.totalZombieKills)} キル`, {
+        id: `reaper:${player.playerName}`,
+        subLabel: `${player.characterNames.length} キャラ`,
+      }),
+    )
 
   const pacifistPool = playerAggregates.filter((player) => player.totalSurvivalTime > 0)
   const pacifistCandidates = pacifistPool.some(
@@ -623,12 +653,12 @@ function buildPlayerCards(playerAggregates: PlayerAggregate[]) {
         b.totalSurvivalTime - a.totalSurvivalTime ||
         a.playerName.localeCompare(b.playerName, 'ja'),
     )
-    .map((player) => ({
-      id: `pacifist:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ / ${formatDurationShort(player.totalSurvivalTime)}`,
-      valueLabel: `キル ${formatCount(player.totalZombieKills)}`,
-    }))
+    .map((player) =>
+      createPlayerEntry(player, `キル ${formatCount(player.totalZombieKills)}`, {
+        id: `pacifist:${player.playerName}`,
+        subLabel: `${player.characterNames.length} キャラ / ${formatDurationShort(player.totalSurvivalTime)}`,
+      }),
+    )
 
   const explorers = [...playerAggregates]
     .filter((player) => player.explorerScore > 0)
@@ -637,12 +667,12 @@ function buildPlayerCards(playerAggregates: PlayerAggregate[]) {
         b.explorerScore - a.explorerScore ||
         a.playerName.localeCompare(b.playerName, 'ja'),
     )
-    .map((player) => ({
-      id: `explorer:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ`,
-      valueLabel: formatCount(player.explorerScore),
-    }))
+    .map((player) =>
+      createPlayerEntry(player, formatCount(player.explorerScore), {
+        id: `explorer:${player.playerName}`,
+        subLabel: `${player.characterNames.length} キャラ`,
+      }),
+    )
 
   const chefs = [...playerAggregates]
     .filter(
@@ -658,109 +688,112 @@ function buildPlayerCards(playerAggregates: PlayerAggregate[]) {
         b.serveWaterIntake - a.serveWaterIntake ||
         a.playerName.localeCompare(b.playerName, 'ja'),
     )
-    .map((player) => ({
-      id: `chef:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ`,
-      valueLabel:
+    .map((player) =>
+      createPlayerEntry(
+        player,
         player.serveCount > 0
           ? `提供 ${formatCount(player.serveCount)} 回`
           : `提供 ${formatDecimal(player.serveCalories)} kcal`,
-    }))
+        {
+          id: `chef:${player.playerName}`,
+          subLabel: `${player.characterNames.length} キャラ`,
+        },
+      ),
+    )
 
   const wreckers = [...playerAggregates]
     .filter((player) => player.wreckerScore > 0)
     .sort(
       (a, b) => b.wreckerScore - a.wreckerScore || a.playerName.localeCompare(b.playerName, 'ja'),
     )
-    .map((player) => ({
-      id: `wrecker:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ`,
-      valueLabel: formatCount(player.wreckerScore),
-    }))
+    .map((player) =>
+      createPlayerEntry(player, formatCount(player.wreckerScore), {
+        id: `wrecker:${player.playerName}`,
+        subLabel: `${player.characterNames.length} キャラ`,
+      }),
+    )
 
   const farmers = [...playerAggregates]
     .filter((player) => player.farming > 0)
     .sort((a, b) => b.farming - a.farming || a.playerName.localeCompare(b.playerName, 'ja'))
-    .map((player) => ({
-      id: `farmer:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ`,
-      valueLabel: formatDecimal(player.farming),
-    }))
+    .map((player) =>
+      createPlayerEntry(player, formatDecimal(player.farming), {
+        id: `farmer:${player.playerName}`,
+        subLabel: `${player.characterNames.length} キャラ`,
+      }),
+    )
 
   const builders = [...playerAggregates]
     .filter((player) => player.build > 0)
     .sort((a, b) => b.build - a.build || a.playerName.localeCompare(b.playerName, 'ja'))
-    .map((player) => ({
-      id: `builder:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ`,
-      valueLabel: formatDecimal(player.build),
-    }))
+    .map((player) =>
+      createPlayerEntry(player, formatDecimal(player.build), {
+        id: `builder:${player.playerName}`,
+        subLabel: `${player.characterNames.length} キャラ`,
+      }),
+    )
 
   const anglers = [...playerAggregates]
     .filter((player) => player.fishCount > 0)
     .sort((a, b) => b.fishCount - a.fishCount || a.playerName.localeCompare(b.playerName, 'ja'))
-    .map((player) => ({
-      id: `angler:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `外道 ${formatCount(player.fishTrashCount)}`,
-      valueLabel: `${formatCount(player.fishCount)} 匹`,
-    }))
+    .map((player) =>
+      createPlayerEntry(player, `${formatCount(player.fishCount)} 匹`, {
+        id: `angler:${player.playerName}`,
+        subLabel: `外道 ${formatCount(player.fishTrashCount)}`,
+      }),
+    )
 
   const trappers = [...playerAggregates]
     .filter((player) => player.trapping > 0)
     .sort((a, b) => b.trapping - a.trapping || a.playerName.localeCompare(b.playerName, 'ja'))
-    .map((player) => ({
-      id: `trapper:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ`,
-      valueLabel: formatDecimal(player.trapping),
-    }))
+    .map((player) =>
+      createPlayerEntry(player, formatDecimal(player.trapping), {
+        id: `trapper:${player.playerName}`,
+        subLabel: `${player.characterNames.length} キャラ`,
+      }),
+    )
 
   const mechanics = [...playerAggregates]
     .filter((player) => player.mechanics > 0)
     .sort((a, b) => b.mechanics - a.mechanics || a.playerName.localeCompare(b.playerName, 'ja'))
-    .map((player) => ({
-      id: `mechanic:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ`,
-      valueLabel: formatDecimal(player.mechanics),
-    }))
+    .map((player) =>
+      createPlayerEntry(player, formatDecimal(player.mechanics), {
+        id: `mechanic:${player.playerName}`,
+        subLabel: `${player.characterNames.length} キャラ`,
+      }),
+    )
 
   const socials = [...playerAggregates]
     .filter((player) => player.socialTime > 0)
     .sort(
       (a, b) => b.socialTime - a.socialTime || a.playerName.localeCompare(b.playerName, 'ja'),
     )
-    .map((player) => ({
-      id: `social:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ`,
-      valueLabel: formatDurationShort(player.socialTime),
-    }))
+    .map((player) =>
+      createPlayerEntry(player, formatDurationShort(player.socialTime), {
+        id: `social:${player.playerName}`,
+        subLabel: `${player.characterNames.length} キャラ`,
+      }),
+    )
 
   const loners = [...playerAggregates]
     .filter((player) => player.lonerTime > 0)
     .sort((a, b) => b.lonerTime - a.lonerTime || a.playerName.localeCompare(b.playerName, 'ja'))
-    .map((player) => ({
-      id: `loner:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ`,
-      valueLabel: formatDurationShort(player.lonerTime),
-    }))
+    .map((player) =>
+      createPlayerEntry(player, formatDurationShort(player.lonerTime), {
+        id: `loner:${player.playerName}`,
+        subLabel: `${player.characterNames.length} キャラ`,
+      }),
+    )
 
   const reaperDoted = [...playerAggregates]
     .filter((player) => player.deathCount > 0)
     .sort((a, b) => b.deathCount - a.deathCount || a.playerName.localeCompare(b.playerName, 'ja'))
-    .map((player) => ({
-      id: `death:${player.playerName}`,
-      label: player.playerName,
-      subLabel: `${player.characterNames.length} キャラ`,
-      valueLabel: `${formatCount(player.deathCount)} 回`,
-    }))
+    .map((player) =>
+      createPlayerEntry(player, `${formatCount(player.deathCount)} 回`, {
+        id: `death:${player.playerName}`,
+        subLabel: `${player.characterNames.length} キャラ`,
+      }),
+    )
 
   const bestPartnerPairs = new Map<
     string,
@@ -800,17 +833,8 @@ function buildPlayerCards(playerAggregates: PlayerAggregate[]) {
       valueLabel: formatDurationShort(pair.durationSec),
     }))
 
-  const socialSectionCandidates: Array<RankingSection | null> = [
-    createSection('player-social', '社交家', socials),
-    createSection('player-loner', '一匹狼', loners),
-  ]
-  const socialSections = socialSectionCandidates.filter(
-    (section): section is RankingSection => section != null,
-  )
-
   const cards = [
     createSingleCard('mainstay', '大黒柱', 'オンライン時間が長いプレイヤーです。', 'プレイヤー', mainstays),
-    createSingleCard('survivor', '生存者', '総生存時間が長いプレイヤーです。', 'プレイヤー', survivors),
     createSingleCard('reaper-possessed', '死神: 憑依', 'ゾンビキル数合計が多いプレイヤーです。', 'プレイヤー', reapers),
     createSingleCard('pacifist', '平和主義者', '総生存時間に対してキル数が少ないプレイヤーです。', 'プレイヤー', pacifists),
     createSingleCard('explorer', '探索者', '探索済みマップ範囲が広いプレイヤーです。', 'プレイヤー', explorers),
@@ -821,15 +845,8 @@ function buildPlayerCards(playerAggregates: PlayerAggregate[]) {
     createSingleCard('angler', '釣り人', '釣果が多いプレイヤーです。', 'プレイヤー', anglers),
     createSingleCard('trapper', '罠師', '罠設置や回収が多いプレイヤーです。', 'プレイヤー', trappers),
     createSingleCard('mechanic', '整備士', '車両整備の行動量が多いプレイヤーです。', 'プレイヤー', mechanics),
-    socialSections.length > 0
-      ? {
-          id: 'social',
-          title: '社交家 / 一匹狼',
-          description: 'socialTime と lonerTime の合計上位です。',
-          unit: 'プレイヤー',
-          sections: socialSections,
-        }
-      : null,
+    createSingleCard('social', '社交家', 'socialTime が長いプレイヤーです。', 'プレイヤー', socials),
+    createSingleCard('loner', '一匹狼', 'lonerTime が長いプレイヤーです。', 'プレイヤー', loners),
     createSingleCard('reaper-doted', '死神: 寵愛', '死亡回数が多いプレイヤーです。', 'プレイヤー', reaperDoted),
     createSingleCard('best-partner', 'ベストパートナー', '最も長く一緒に行動した相手がいるプレイヤーです。', 'プレイヤー', bestPartners),
   ]

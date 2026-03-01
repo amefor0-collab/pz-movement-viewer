@@ -1,4 +1,4 @@
-﻿#root {
+#root {
   min-height: 100vh;
 }
 
@@ -155,6 +155,8 @@
 
 .ranking-shell {
   --ranking-card-width: 18rem;
+  --ranking-sticky-top: 0.85rem;
+  --ranking-toolbar-clearance: 8rem;
   width: min(100%, 68rem);
   margin: 0 auto;
   display: grid;
@@ -203,10 +205,42 @@
 }
 
 .ranking-toolbar {
+  position: sticky;
+  top: var(--ranking-sticky-top);
+  z-index: 24;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(16rem, 19rem);
   gap: 0.9rem;
   align-items: end;
+  padding: 0.75rem;
+  border: 1px solid rgba(205, 218, 238, 0.92);
+  border-radius: 1.1rem;
+  background: rgba(248, 251, 255, 0.92);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 18px 36px rgba(16, 36, 68, 0.1);
+}
+
+.ranking-toolbar-sentinel {
+  height: 1px;
+  margin-top: -1px;
+}
+
+
+.ranking-toolbar.is-pinned {
+  padding: 0.52rem 0.58rem;
+}
+
+.ranking-toolbar.is-pinned .ranking-switch-panel {
+  padding: 0.62rem 0.68rem;
+}
+
+.ranking-toolbar.is-pinned .ranking-switch-option {
+  min-height: 3.2rem;
+  padding: 0.82rem 1rem;
+}
+
+.ranking-toolbar.is-pinned .ranking-player-filter span {
+  display: none;
 }
 
 .ranking-content-layout {
@@ -221,8 +255,9 @@
 }
 
 .ranking-sidebar {
-  position: sticky;
-  top: 1rem;
+  position: static;
+  display: grid;
+  gap: 1rem;
 }
 
 .ranking-partner-card {
@@ -288,10 +323,10 @@
   border: 1px solid rgba(175, 194, 224, 0.98);
   border-radius: 1rem;
   background: linear-gradient(180deg, rgba(253, 254, 255, 0.99), rgba(237, 244, 252, 0.98));
-  padding: 1.05rem 1.1rem;
+  padding: 0.82rem 1rem;
   text-align: left;
-  display: grid;
-  gap: 0.32rem;
+  display: flex;
+  align-items: center;
   cursor: pointer;
   transition:
     transform 120ms ease,
@@ -299,20 +334,15 @@
     border-color 120ms ease,
     background-color 120ms ease,
     color 120ms ease;
-  min-height: 5.8rem;
+  min-height: 3.2rem;
   box-shadow: 0 6px 14px rgba(22, 45, 81, 0.06);
 }
 
 .ranking-switch-option strong {
-  font-size: 1.06rem;
+  font-size: 0.98rem;
   color: #1a3a63;
 }
 
-.ranking-switch-option span {
-  font-size: 0.8rem;
-  line-height: 1.45;
-  color: #5d6f8f;
-}
 
 .ranking-switch-option:hover,
 .ranking-switch-option:focus-visible {
@@ -335,10 +365,6 @@
 
 .ranking-switch-option.is-active strong {
   color: #0c2d55;
-}
-
-.ranking-switch-option.is-active span {
-  color: #214673;
 }
 
 .ranking-player-filter {
@@ -1886,6 +1912,10 @@
     padding: 1rem;
   }
 
+  .ranking-shell {
+    --ranking-toolbar-clearance: 10.75rem;
+  }
+
   .ranking-grid {
     grid-template-columns: 1fr;
   }
@@ -1910,6 +1940,11 @@
 
   .ranking-switch {
     grid-template-columns: 1fr;
+  }
+
+  .ranking-shell {
+    --ranking-sticky-top: 0.55rem;
+    --ranking-toolbar-clearance: 13rem;
   }
 
   .info-panel {
@@ -1963,5 +1998,6 @@
     width: min(16rem, 62vw);
   }
 }
+
 
 

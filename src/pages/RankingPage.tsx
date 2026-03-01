@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import '../App.css'
 import {
   buildRankingData,
@@ -298,6 +298,8 @@ function RankingPage() {
   const [expandedSelectedSectionIds, setExpandedSelectedSectionIds] = useState<string[]>([])
   const [selectedPlayerName, setSelectedPlayerName] = useState('')
   const [showPlayerPicker, setShowPlayerPicker] = useState(false)
+  const [isToolbarPinned, setIsToolbarPinned] = useState(false)
+  const toolbarSentinelRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -357,6 +359,12 @@ function RankingPage() {
 
   const activeCards =
     rankingMode === 'character' ? rankingData.characterCards : rankingData.playerCards
+  const sidebarBestPartnerCard =
+    rankingMode === 'player' ? activeCards.find((card) => card.id === 'best-partner') ?? null : null
+  const gridCards =
+    rankingMode === 'player'
+      ? activeCards.filter((card) => card.id !== 'best-partner')
+      : activeCards
 
   const playerOptions = useMemo(() => {
     const names = new Set<string>()
@@ -410,6 +418,64 @@ function RankingPage() {
     }
   }, [loadStatus, playerOptions, selectedPlayerName])
 
+  useEffect(() => {
+    const sentinel = toolbarSentinelRef.current
+    const root = document.documentElement
+    if (!sentinel || !root) {
+      return
+    }
+    const sentinelElement = sentinel
+    const shell = sentinelElement.closest('.ranking-shell') as HTMLElement | null
+
+    const parseCssLength = (value: string) => {
+      const trimmed = value.trim()
+      if (!trimmed) {
+        return 0
+      }
+      const rootFontSize =
+        Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+      if (trimmed.endsWith('rem')) {
+        return Number.parseFloat(trimmed) * rootFontSize
+      }
+      if (trimmed.endsWith('px')) {
+        return Number.parseFloat(trimmed)
+      }
+      const numeric = Number.parseFloat(trimmed)
+      return Number.isFinite(numeric) ? numeric : 0
+    }
+
+    let frameId = 0
+
+    const updatePinnedState = () => {
+      frameId = 0
+      const stickyTop = parseCssLength(
+        getComputedStyle(shell ?? root).getPropertyValue('--ranking-sticky-top'),
+      )
+      const sentinelTop = sentinelElement.getBoundingClientRect().top
+      const hysteresis = isToolbarPinned ? 10 : 0
+      setIsToolbarPinned(sentinelTop <= stickyTop + hysteresis)
+    }
+
+    const requestUpdate = () => {
+      if (frameId !== 0) {
+        return
+      }
+      frameId = window.requestAnimationFrame(updatePinnedState)
+    }
+
+    requestUpdate()
+    window.addEventListener('scroll', requestUpdate, { passive: true })
+    window.addEventListener('resize', requestUpdate)
+
+    return () => {
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId)
+      }
+      window.removeEventListener('scroll', requestUpdate)
+      window.removeEventListener('resize', requestUpdate)
+    }
+  }, [isToolbarPinned])
+
   const expandedCardIdSet = useMemo(() => new Set(expandedCardIds), [expandedCardIds])
   const expandedSelectedSectionIdSet = useMemo(
     () => new Set(expandedSelectedSectionIds),
@@ -430,6 +496,13 @@ function RankingPage() {
         ? prev.filter((id) => id !== sectionKey)
         : [...prev, sectionKey],
     )
+  }
+
+  const handleRankingModeChange = (nextMode: RankingMode) => {
+    setRankingMode(nextMode)
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'auto' })
+    }
   }
 
   return (
@@ -456,26 +529,25 @@ function RankingPage() {
         </section>
 
         <section className="ranking-panel">
-          <div className="ranking-toolbar">
+          <div ref={toolbarSentinelRef} className="ranking-toolbar-sentinel" aria-hidden="true" />
+          <div className={`ranking-toolbar${isToolbarPinned ? ' is-pinned' : ''}`}>
             <div className="ranking-switch-panel">
               <div className="ranking-switch" role="tablist" aria-label="ランキング表示切替">
                 <button
                   className={`ranking-switch-option${rankingMode === 'character' ? ' is-active' : ''}`}
-                  onClick={() => setRankingMode('character')}
+                  onClick={() => handleRankingModeChange('character')}
                   role="tab"
                   aria-selected={rankingMode === 'character'}
                 >
                   <strong>キャラクター統計</strong>
-                  <span>各キャラクターごとの成績を表示</span>
                 </button>
                 <button
                   className={`ranking-switch-option${rankingMode === 'player' ? ' is-active' : ''}`}
-                  onClick={() => setRankingMode('player')}
+                  onClick={() => handleRankingModeChange('player')}
                   role="tab"
                   aria-selected={rankingMode === 'player'}
                 >
                   <strong>プレイヤー統計</strong>
-                  <span>同一プレイヤー配下のキャラを集約して表示</span>
                 </button>
               </div>
             </div>
@@ -531,7 +603,7 @@ function RankingPage() {
           {loadStatus === 'ready' && activeCards.length > 0 && (
             <div className={`ranking-content-layout${showPartnerSidebar ? ' has-sidebar' : ''}`}>
               <section className="ranking-grid">
-                {activeCards.map((card) => (
+                {gridCards.map((card) => (
                 <RankingCardView
                   key={`${rankingMode}:${card.id}`}
                   card={card}
@@ -547,6 +619,18 @@ function RankingPage() {
 
               {showPartnerSidebar && (
                 <aside className="ranking-sidebar">
+                  {sidebarBestPartnerCard && (
+                    <RankingCardView
+                      key={`${rankingMode}:${sidebarBestPartnerCard.id}`}
+                      card={sidebarBestPartnerCard}
+                      expanded={expandedCardIdSet.has(`${rankingMode}:${sidebarBestPartnerCard.id}`)}
+                      onToggle={() => toggleCardExpansion(`${rankingMode}:${sidebarBestPartnerCard.id}`)}
+                      selectedPlayerName={selectedPlayerName}
+                      rankingMode={rankingMode}
+                      expandedSelectedSectionIds={expandedSelectedSectionIdSet}
+                      onToggleSelectedSection={toggleSelectedSectionExpansion}
+                    />
+                  )}
                   <SelectedPlayerPartnerCard
                     playerName={selectedPlayerName}
                     partners={selectedPlayerPartners}

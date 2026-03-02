@@ -606,8 +606,8 @@ function buildCharacterCards(characterMetrics: CharacterMetric[]) {
     createSingleCard('angler', '釣り人', '釣果が多いキャラクターです。', 'キャラ', anglers),
     createSingleCard('trapper', '罠師', '罠設置や回収が多いキャラクターです。', 'キャラ', trappers),
     createSingleCard('mechanic', '整備士', '車両整備の行動量が多いキャラクターです。', 'キャラ', mechanics),
-    createSingleCard('social', '社交家', 'socialTime が長いキャラクターです。', 'キャラ', socials),
-    createSingleCard('loner', '一匹狼', 'lonerTime が長いキャラクターです。', 'キャラ', loners),
+    createSingleCard('social', '社交家', '他人と過ごした時間が長いキャラクターです。', 'キャラ', socials),
+    createSingleCard('loner', '一匹狼', '一人で過ごした時間が長いキャラクターです。', 'キャラ', loners),
   ]
 
   return cards.filter((card): card is RankingCard => card != null)
@@ -814,7 +814,7 @@ function buildPlayerCards(playerAggregates: PlayerAggregate[]) {
     }
 
     bestPartnerPairs.set(pairKey, {
-      label: `${pairNames[0]}＆${pairNames[1]}`,
+      label: `${pairNames[0]}＆\u200B${pairNames[1]}`,
       durationSec: player.bestPartnerSec,
       sortNames: pairNames,
     })
@@ -845,8 +845,8 @@ function buildPlayerCards(playerAggregates: PlayerAggregate[]) {
     createSingleCard('angler', '釣り人', '釣果が多いプレイヤーです。', 'プレイヤー', anglers),
     createSingleCard('trapper', '罠師', '罠設置や回収が多いプレイヤーです。', 'プレイヤー', trappers),
     createSingleCard('mechanic', '整備士', '車両整備の行動量が多いプレイヤーです。', 'プレイヤー', mechanics),
-    createSingleCard('social', '社交家', 'socialTime が長いプレイヤーです。', 'プレイヤー', socials),
-    createSingleCard('loner', '一匹狼', 'lonerTime が長いプレイヤーです。', 'プレイヤー', loners),
+    createSingleCard('social', '社交家', '他人と過ごした時間が長いプレイヤーです。', 'プレイヤー', socials),
+    createSingleCard('loner', '一匹狼', '一人で過ごした時間が長いプレイヤーです。', 'プレイヤー', loners),
     createSingleCard('reaper-doted', '死神: 寵愛', '死亡回数が多いプレイヤーです。', 'プレイヤー', reaperDoted),
     createSingleCard('best-partner', 'ベストパートナー', '最も長く一緒に行動した相手がいるプレイヤーです。', 'プレイヤー', bestPartners),
   ]

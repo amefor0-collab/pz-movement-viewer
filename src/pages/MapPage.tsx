@@ -996,9 +996,7 @@ function MapPage() {
       try {
         const tracksResponse = await fetch(TRACKS_URL, { signal: controller.signal })
         if (!tracksResponse.ok) {
-          throw new Error(
-            `tracks.json の読み込みに失敗しました (HTTP ${tracksResponse.status})`,
-          )
+          throw new Error('map-data-load-failed')
         }
         const loadedTracks = (await tracksResponse.json()) as TracksData
         if (controller.signal.aborted) {
@@ -1043,17 +1041,18 @@ function MapPage() {
         try {
           const snapshotResponse = await fetch(SNAPSHOT_URL, { signal: controller.signal })
           if (!snapshotResponse.ok) {
-            throw new Error(`snapshot.json HTTP ${snapshotResponse.status}`)
+            throw new Error('snapshot-load-failed')
           }
           const loadedSnapshot = (await snapshotResponse.json()) as SnapshotData
           if (!controller.signal.aborted) {
             setSnapshotData(loadedSnapshot)
           }
-        } catch {
+        } catch (error) {
           if (!controller.signal.aborted) {
+            console.error('Failed to load snapshot data', error)
             setSnapshotData(null)
             setSnapshotWarning(
-              'snapshot.json の読み込みに失敗しました。ステータス表示は一部利用できません。',
+              'ステータス情報の読み込みに失敗しました。一部表示できません。',
             )
           }
         }
@@ -1061,11 +1060,8 @@ function MapPage() {
         if (controller.signal.aborted) {
           return
         }
-        const message =
-          error instanceof Error
-            ? error.message
-            : 'tracks.json の読み込みに失敗しました。'
-        setErrorMessage(message)
+        console.error('Failed to load map data', error)
+        setErrorMessage('読み込みに失敗しました。再試行してください。')
         setLoadStatus('error')
         setSnapshotLoadStatus('idle')
       }
@@ -2698,10 +2694,7 @@ function MapPage() {
       <main className="app-main">
         {loadStatus === 'loading' && (
           <section className="status-card">
-            <h2>データを読み込み中...</h2>
-            <p>
-              <code>public/data/tracks.json</code> を取得しています。
-            </p>
+            <h2>読み込み中...</h2>
           </section>
         )}
 
@@ -3453,7 +3446,7 @@ function MapPage() {
                   </div>
                   <p className="status-name">{statusCharacterName}</p>
                   {snapshotLoadStatus === 'loading' ? (
-                    <p className="muted">snapshot を読み込み中...</p>
+                    <p className="muted">読み込み中...</p>
                   ) : selectedSnapshotRecord ? (
                     <dl className="status-list">
                       <div>

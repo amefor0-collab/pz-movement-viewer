@@ -315,10 +315,10 @@ function RankingPage() {
         ])
 
         if (!tracksResponse.ok) {
-          throw new Error(`tracks.json の読み込みに失敗しました (HTTP ${tracksResponse.status})`)
+          throw new Error('ranking-data-load-failed')
         }
         if (!snapshotResponse.ok) {
-          throw new Error(`snapshot.json の読み込みに失敗しました (HTTP ${snapshotResponse.status})`)
+          throw new Error('ranking-data-load-failed')
         }
 
         const [loadedTracks, loadedSnapshot] = (await Promise.all([
@@ -337,14 +337,11 @@ function RankingPage() {
         if (controller.signal.aborted) {
           return
         }
+        console.error('Failed to load ranking data', error)
         setTracksData(null)
         setSnapshotData(null)
         setLoadStatus('error')
-        setErrorMessage(
-          error instanceof Error
-            ? error.message
-            : 'ランキング用データの読み込みに失敗しました。',
-        )
+        setErrorMessage('読み込みに失敗しました。再試行してください。')
       }
     }
 
@@ -569,14 +566,7 @@ function RankingPage() {
 
           {loadStatus === 'loading' && (
             <section className="status-card">
-              <h2>ランキングデータを読み込み中...</h2>
-              <p>
-                <code>public/data/snapshot.json</code> と
-                {' '}
-                <code>public/data/tracks.json</code>
-                {' '}
-                を取得しています。
-              </p>
+              <h2>読み込み中...</h2>
             </section>
           )}
 

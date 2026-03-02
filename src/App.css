@@ -2,15 +2,20 @@
   min-height: 100vh;
 }
 
+:root {
+  --app-shell-background:
+    radial-gradient(circle at 18% 16%, rgba(215, 233, 255, 0.92) 0, transparent 34%),
+    radial-gradient(circle at 84% 18%, rgba(255, 231, 210, 0.9) 0, transparent 28%),
+    radial-gradient(circle at 82% 84%, rgba(255, 239, 208, 0.86) 0, transparent 32%),
+    linear-gradient(180deg, #f5f7fc 0%, #eaf0f8 100%);
+}
+
 .intro-screen {
   min-height: 100vh;
   display: grid;
   place-items: center;
   padding: 2rem;
-  background:
-    radial-gradient(circle at 20% 15%, #d7e9ff 0, transparent 36%),
-    radial-gradient(circle at 85% 85%, #ffe9cb 0, transparent 35%),
-    #f5f7fc;
+  background: var(--app-shell-background);
 }
 
 .intro-card {
@@ -147,10 +152,7 @@
 .ranking-screen {
   min-height: 100vh;
   padding: 2rem;
-  background:
-    radial-gradient(circle at 15% 18%, rgba(215, 233, 255, 0.9) 0, transparent 34%),
-    radial-gradient(circle at 86% 20%, rgba(255, 231, 210, 0.9) 0, transparent 28%),
-    linear-gradient(180deg, #f4f7fb 0%, #eaf0f8 100%);
+  background: var(--app-shell-background);
 }
 
 .ranking-shell {
@@ -603,9 +605,9 @@
 .ranking-entry-body strong {
   color: #19375f;
   font-size: 0.84rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .ranking-entry-body span {
@@ -749,7 +751,7 @@
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: #1b2128;
+  background: var(--app-shell-background);
 }
 
 .app-main {
